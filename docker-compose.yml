@@ -5,18 +5,16 @@ services:
     environment:
       POSTGRES_DB: kassenbuch
       POSTGRES_USER: kassenbuch
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme_in_production}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kassenbuch"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 512M
 
   backend:
     build: ./backend
@@ -25,26 +23,27 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://kassenbuch:${DB_PASSWORD:-changeme_in_production}@db:5432/kassenbuch
-      JWT_SECRET: ${JWT_SECRET:-changeme_jwt_secret_in_production}
+      DATABASE_URL: postgresql://kassenbuch:${DB_PASSWORD}@db:5432/kassenbuch
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
       PORT: 3000
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+    networks:
+      - internal
 
   frontend:
     build: ./frontend
     restart: unless-stopped
     depends_on:
       - backend
-    ports:
-      - "127.0.0.1:8080:80"
-    deploy:
-      resources:
-        limits:
-          memory: 256M
+    networks:
+      - reverse_proxy
+      - internal
 
 volumes:
   pgdata:
+
+networks:
+  reverse_proxy:
+    external: true   # vom Caddy-Compose erstellt
+  internal:
+    internal: true
