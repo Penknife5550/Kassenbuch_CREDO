@@ -1,0 +1,117 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<config>
+  <General background="AUTORUN/start.bmp" icon="autorun/StartEXE.ico" caption="Schnittstellenentwicklungsleitfaden für das DATEV-Format" windowpos="center" top="100" left="70" height="518" width="693" bgcolor="255 255 255" title="true" zorder="" />
+  <ToolTippConfig width="180" height="90" bgcolor="210 210 210" tttype="cursortt">
+    <TTFont textcolor="0 0 0" font="Verdana" fontsize="12" />
+  </ToolTippConfig>
+  <ButtonConfig>
+    <ButtonLayout width="20" height="15" bgcolor="255 255 255" transparent="true" />
+    <ButtonMouseOverLayout bgcolor="0 255 255" transparent="true" />
+    <Font textcolor="0 0 0" font="Verdana" fontsize="13" />
+    <MouseOverFont textcolor="0 150 150" font="Verdana" fontsize="14" />
+  </ButtonConfig>
+  <BtnBeenden>
+    <ButtonPosition left="0" top="0" />
+    <ButtonLayout width="1" height="1" bgcolor="255 255 255" transparent="true" caption="Beenden" tooltipp="" icon="" iconhorizontaloffset="5" icontransparentcolor="255 255 255" />
+    <ButtonMouseOverLayout bgcolor="255 255 255" transparent="true" />
+    <Font textcolor="0 0 0" font="Verdana" fontsize="1" />
+    <MouseOverFont textcolor="0 0 0" font="Verdana" fontsize="1" />
+  </BtnBeenden>  
+  <Pages>
+    <Page>
+
+      <Button>
+        <ButtonPosition left="36" top="136" />
+        <Font textcolor="0 0 0" font="Verdana Bold" fontsize="14"/>
+        <ButtonLayout caption="Deutsch" width="100"/>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="380" top="136" />
+        <Font textcolor="0 0 0" font="Verdana Bold" fontsize="14"/>
+        <ButtonLayout caption="English" width="100"/>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="36" top="169" />
+        <ButtonLayout caption="Wichtige Hinweise" tooltipp="Dieses Dokument enthält Informationen zur Schnittstellenrealisierung und die Kontaktdaten für Rückfragen." width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Wichtige-Hinweise.pdf" />
+        </Command>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="380" top="169" />
+        <ButtonLayout caption="Important information" tooltipp="This document includes important information on the interface realization and the contact data for support." width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Important-Information.pdf"/>
+        </Command>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="36" top="202" />
+        <ButtonLayout caption="Datei- und Satzbeschreibung" tooltipp="Dieses Dokument beschreibt die ASCII-Struktur des DATEV-Formats." width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Leitfaden-deutsch\Leitfaden-deutsch.pdf" />
+        </Command>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="380" top="202" />
+        <ButtonLayout caption="Data categories and field descriptions" tooltipp="This document describes the ASCII structure of the DATEV format (data categories and field descriptions)." width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Leitfaden-englisch\Leitfaden-englisch.pdf"/>
+        </Command>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="36" top="235" />
+        <ButtonLayout caption="DATEV-Format Prüfprogramm" tooltipp="Damit kann eine Formatprüfung der erstellten Schnittstelle durchgeführt werden. 
+	
+" width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="PRUEFPROGRAMM\DatevFormatPruefProgramm.exe" />
+        </Command>
+      </Button>
+
+      <Button>
+        <Font textcolor="150 150 150" font="Verdana" fontsize="13" />
+        <ButtonPosition left="380" top="235" />
+        <ButtonLayout caption="not availiable in English" width="280"/>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="36" top="268" />
+        <ButtonLayout caption="Musterdaten" tooltipp="Musterdaten für Buchungssätze und Stammdaten. 
+
+" width="280"  />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Musterdaten" />
+        </Command>
+      </Button>
+
+      <Button>
+        <Font textcolor="150 150 150" font="Verdana" fontsize="13" />
+        <ButtonPosition left="380" top="268" />
+        <ButtonLayout caption="not availiable in English" width="280"/>
+      </Button>
+      
+      <Button>
+        <ButtonPosition left="36" top="301" />
+        <ButtonLayout caption="Kontenrahmen" tooltipp="Kontenrahmen SKR03 und SKR04 als PDF in Deutsch." width="280"  />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Kontenrahmen-deutsch" />
+        </Command>
+      </Button>
+
+      <Button>
+        <ButtonPosition left="380" top="301" />
+        <ButtonLayout caption="Chart of accounts" tooltipp="Chart of accounts SKR03 and SKR04." width="280" />
+        <Command type="exec">
+          <ExecCommandConfig maximized="false" path="Kontenrahmen-english" />
+        </Command>
+      </Button>
+
+    </Page>
+  </Pages>
+</config>

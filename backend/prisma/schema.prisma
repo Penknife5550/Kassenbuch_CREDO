@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum DebitCredit {
+  S
+  H
+}
+
+enum AccountType {
+  KASSE
+  TRANSIT
+  GEGENKONTO
+}
+
+model School {
+  id                       String   @id @default(uuid())
+  name                     String
+  code                     String   @unique
+  address                  String?
+  kasseAccountId           String?  @map("kasse_account_id")
+  anfangsbestandAccountId  String?  @map("anfangsbestand_account_id")
+  kassendifferenzAccountId String?  @map("kassendifferenz_account_id")
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  kasseAccount           Account?       @relation("SchoolKasse", fields: [kasseAccountId], references: [id])
+  anfangsbestandAccount  Account?       @relation("SchoolAnfangsbestand", fields: [anfangsbestandAccountId], references: [id])
+  kassendifferenzAccount Account?       @relation("SchoolKassendifferenz", fields: [kassendifferenzAccountId], references: [id])
+  users                  User[]
+  bookings               Booking[]
+  dailyClosings          DailyClosing[]
+  receiptSeq             ReceiptSequence[]
+
+  @@map("schools")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  role         UserRole @default(USER)
+  schoolId     String?  @map("school_id")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  school   School?    @relation(fields: [schoolId], references: [id])
+  bookings Booking[]  @relation("BookingCreator")
+  stornos  Booking[]  @relation("BookingStornoBy")
+  closings DailyClosing[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id            String      @id @default(uuid())
+  accountNumber String      @map("account_number")
+  name          String
+  description   String?
+  type          AccountType
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  bookingsAsAccount        Booking[] @relation("BookingAccount")
+  bookingsAsCounterAccount Booking[] @relation("BookingCounterAccount")
+  assignedSchools            School[] @relation("SchoolKasse")
+  anfangsbestandForSchools   School[] @relation("SchoolAnfangsbestand")
+  kassendifferenzForSchools  School[] @relation("SchoolKassendifferenz")
+
+  @@unique([accountNumber, type])
+  @@map("accounts")
+}
+
+model CostCenter {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  bookings Booking[]
+
+  @@map("cost_centers")
+}
+
+model Booking {
+  id              String      @id @default(uuid())
+  schoolId        String      @map("school_id")
+  receiptNumber   Int         @map("receipt_number")
+  bookingDate     DateTime    @map("booking_date") @db.Date
+  amount          Decimal     @db.Decimal(12, 2)
+  debitCredit     DebitCredit @map("debit_credit")
+  accountId       String      @map("account_id")
+  counterAccountId String     @map("counter_account_id")
+  costCenterId    String?     @map("cost_center_id")
+  description     String
+  taxKey          String?     @map("tax_key")
+  isStorno        Boolean     @default(false) @map("is_storno")
+  stornoOfId      String?     @map("storno_of_id")
+  stornoById      String?     @map("storno_by_id")
+  isFinalized     Boolean     @default(false) @map("is_finalized")
+  splitGroupId    String?     @map("split_group_id")
+  createdById     String      @map("created_by_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  school         School      @relation(fields: [schoolId], references: [id])
+  account        Account     @relation("BookingAccount", fields: [accountId], references: [id])
+  counterAccount Account     @relation("BookingCounterAccount", fields: [counterAccountId], references: [id])
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
+  createdBy      User        @relation("BookingCreator", fields: [createdById], references: [id])
+  stornoBy       User?       @relation("BookingStornoBy", fields: [stornoById], references: [id])
+  stornoOf       Booking?      @relation("BookingStorno", fields: [stornoOfId], references: [id])
+  stornoBookings Booking[]     @relation("BookingStorno")
+  dailyClosingCorrection DailyClosing? @relation("DailyClosingCorrection")
+
+  @@index([schoolId, bookingDate])
+  @@index([schoolId, isFinalized])
+  @@index([splitGroupId])
+  @@map("bookings")
+}
+
+model ReceiptSequence {
+  id        String @id @default(uuid())
+  schoolId  String @unique @map("school_id")
+  lastNumber Int   @default(0) @map("last_number")
+
+  school School @relation(fields: [schoolId], references: [id])
+
+  @@map("receipt_sequences")
+}
+
+model DailyClosing {
+  id                  String   @id @default(uuid())
+  schoolId            String   @map("school_id")
+  closingDate         DateTime @map("closing_date") @db.Date
+  expectedBalance     Decimal  @map("expected_balance") @db.Decimal(12, 2)
+  actualBalance       Decimal  @map("actual_balance") @db.Decimal(12, 2)
+  difference          Decimal  @db.Decimal(12, 2)
+  closedById          String   @map("closed_by_id")
+  comment             String?  @map("comment")
+  correctionBookingId String?  @unique @map("correction_booking_id")
+  denominationCounts  Json?    @map("denomination_counts")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  school             School   @relation(fields: [schoolId], references: [id])
+  closedBy           User     @relation(fields: [closedById], references: [id])
+  correctionBooking  Booking? @relation("DailyClosingCorrection", fields: [correctionBookingId], references: [id])
+
+  @@unique([schoolId, closingDate])
+  @@map("daily_closings")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  oldValue   String?  @map("old_value")
+  newValue   String?  @map("new_value")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model DatevExportConfig {
+  id               String @id @default(uuid())
+  beraterNummer    String @map("berater_nummer")
+  mandantenNummer  String @map("mandanten_nummer")
+  wirtschaftsjahrBeginn String @map("wirtschaftsjahr_beginn")
+  sachkontenLaenge Int    @default(4) @map("sachkonten_laenge")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("datev_export_config")
+}

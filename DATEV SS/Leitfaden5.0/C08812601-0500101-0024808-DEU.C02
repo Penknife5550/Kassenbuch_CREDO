@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- ?xml-stylesheet type="text/xsl" href="DontChange.xsl"? -->
+<INHALT>
+<DEPOTS>
+<DEPOT DEPOTArt="CD/DVD" Ident="C08812601-0500101-0024808-DEU">
+<PID Schluessel="C08812601" Version="05.00" BuildNr="0024808" Vollversion="1" Freigabe="1"/>
+<NAME>Schnittstellenentwicklungsleitfaden für das DATEV-Format</NAME>
+<LOKALISIERUNG Land="DEU"/>
+<PRODUKTION Datum="14.10.2015" Uhrzeit="09:00:09" Land="DEU"/>
+</DEPOT>
+</DEPOTS>
+<PRODUKTE VerSchluesselt="0">
+<PRODUKT PEArt="Komponente" PType="OCOMP" PEID="000427709" Ident="IRW07000- 23 101-0000-DEU">
+<PID Schluessel="IRW07000" Version="2.3" BuildNr="0000" Vollversion="1" Freigabe="1" Hotfix="0" LastChange="20151013131614"/>
+<NAME>Prüftool DATEV-Format</NAME>
+<INFOVERSION></INFOVERSION>
+<TLP>1</TLP>
+<LOKALISIERUNG Sprache="DEU" Culture="de-DE"/>
+<ABLAGE>
+<PFAD Groesse="000000003743739" CheckSum="" Ref="PRUEFPROGRAMM"/>
+</ABLAGE>
+<PEIDS>
+</PEIDS>
+<INSTATTRIBUTE><IA Name="PA">OCOMP</IA><IA Name="IN">110</IA><IA Name="LZ">00</IA></INSTATTRIBUTE></PRODUKT>
+<PRODUKT PEArt="Komponente" PType="OCOMP" PEID="000428905" Ident="DOS34200-0500101-0000-DEU">
+<PID Schluessel="DOS34200" Version="05.00" BuildNr="0000" Vollversion="1" Freigabe="1" Hotfix="0" LastChange="20151014081816"/>
+<NAME>Schnittstellenentwicklungsleitfaden</NAME>
+<INFOVERSION></INFOVERSION>
+<TLP>1</TLP>
+<LOKALISIERUNG Sprache="DEU" Culture="de-DE"/>
+<ABLAGE>
+<PFAD Groesse="000000006041529" CheckSum="" Ref=""/>
+</ABLAGE>
+<PEIDS>
+</PEIDS>
+<INSTATTRIBUTE><IA Name="PA">OCOMP</IA><IA Name="IN">110</IA><IA Name="LZ">00</IA></INSTATTRIBUTE></PRODUKT>
+</PRODUKTE>
+</INHALT>
