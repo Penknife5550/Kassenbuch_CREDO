@@ -68,6 +68,17 @@ export function Schools() {
     setKasseAccountId(s.kasseAccountId || ''); setShowForm(true);
   };
 
+  const handleDelete = async (s: School) => {
+    if (!window.confirm(`Schule "${s.name}" (${s.code}) wirklich löschen?\n\nAlle zugeordneten Benutzer werden ebenfalls gelöscht!`)) return;
+    setError('');
+    try {
+      await api.del(`/schools/${s.id}`);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Fehler beim Löschen');
+    }
+  };
+
   return (
     <div>
       <div className="flex-between mb-3">
@@ -76,6 +87,8 @@ export function Schools() {
           + Neue Schule
         </button>
       </div>
+
+      {error && !showForm && <div className="alert alert-error mb-3" role="alert">{error}</div>}
 
       {showForm && (
         <div className="card mb-3">
@@ -136,7 +149,10 @@ export function Schools() {
                   <td>{s.address || '–'}</td>
                   <td>{s.kasseAccount ? `${s.kasseAccount.accountNumber} – ${s.kasseAccount.name}` : '–'}</td>
                   <td>{s.isActive ? <span className="badge badge-finalized">Aktiv</span> : <span className="badge badge-storno">Inaktiv</span>}</td>
-                  <td><button className="btn btn-sm btn-outline" onClick={() => startEdit(s)}>Bearbeiten</button></td>
+                  <td className="flex-gap">
+                    <button className="btn btn-sm btn-outline" onClick={() => startEdit(s)}>Bearbeiten</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(s)}>Löschen</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

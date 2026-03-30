@@ -140,3 +140,54 @@ schoolsRouter.put('/:id', requireAdmin, async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Interner Serverfehler' });
   }
 });
+
+schoolsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const schoolId = getParam(req, 'id');
+    const school = await prisma.school.findUnique({ where: { id: schoolId } });
+    if (!school) {
+      res.status(404).json({ error: 'Schule nicht gefunden' });
+      return;
+    }
+
+    const bookingCount = await prisma.booking.count({ where: { schoolId } });
+    if (bookingCount > 0) {
+      res.status(409).json({
+        error: `Schule kann nicht gelöscht werden – es existieren ${bookingCount} Buchung(en).`,
+      });
+      return;
+    }
+
+    const closingCount = await prisma.dailyClosing.count({ where: { schoolId } });
+    if (closingCount > 0) {
+      res.status(409).json({
+        error: `Schule kann nicht gelöscht werden – es existieren ${closingCount} Tagesabschluss/-abschlüsse.`,
+      });
+      return;
+    }
+
+    await prisma.$transaction([
+      prisma.receiptSequence.deleteMany({ where: { schoolId } }),
+      prisma.user.deleteMany({ where: { schoolId } }),
+      prisma.school.delete({ where: { id: schoolId } }),
+    ]);
+
+    try {
+      await logAudit({
+        userId: req.user!.userId,
+        action: 'DELETE_SCHOOL',
+        entityType: 'school',
+        entityId: schoolId,
+        oldValue: school,
+        ipAddress: getClientIp(req),
+      });
+    } catch (auditErr) {
+      console.error('Audit log failed:', auditErr);
+    }
+
+    res.status(204).end();
+  } catch (err) {
+    console.error('DELETE /schools/:id error:', err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
