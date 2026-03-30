@@ -1,13 +1,22 @@
+# =============================================================================
+# Kassenbuch CREDO - Docker Compose (Multi-Mandant)
+# =============================================================================
+# Mandant in .env setzen, dann:  docker compose up -d --build
+#
+# Caddy Reverse-Proxy: auf Container "kb-${MANDANT}-frontend" Port 80 zeigen
+# =============================================================================
+
 services:
   db:
     image: postgres:16-alpine
+    container_name: kb-${MANDANT}-db
     restart: unless-stopped
     environment:
       POSTGRES_DB: kassenbuch
       POSTGRES_USER: kassenbuch
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - kb_${MANDANT}_pgdata:/var/lib/postgresql/data
     networks:
       - internal
     healthcheck:
@@ -18,6 +27,7 @@ services:
 
   backend:
     build: ./backend
+    container_name: kb-${MANDANT}-backend
     restart: unless-stopped
     depends_on:
       db:
@@ -32,6 +42,7 @@ services:
 
   frontend:
     build: ./frontend
+    container_name: kb-${MANDANT}-frontend
     restart: unless-stopped
     depends_on:
       - backend
@@ -40,7 +51,7 @@ services:
       - internal
 
 volumes:
-  pgdata:
+  kb_${MANDANT}_pgdata:
 
 networks:
   reverse_proxy:
