@@ -16,7 +16,7 @@ services:
       POSTGRES_USER: kassenbuch
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - kb_${MANDANT}_pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     networks:
       - internal
     healthcheck:
@@ -51,7 +51,8 @@ services:
       - internal
 
 volumes:
-  kb_${MANDANT}_pgdata:
+  pgdata:
+    name: kb_${MANDANT}_pgdata
 
 networks:
   reverse_proxy:
