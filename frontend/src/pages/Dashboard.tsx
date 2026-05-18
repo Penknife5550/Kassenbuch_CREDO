@@ -211,6 +211,11 @@ export function Dashboard() {
               <button className="btn btn-outline" onClick={() => setShowPdfExport(true)}>
                 Kassenbuch drucken
               </button>
+              {anfangsbestandAccount && kasseAccounts.length > 0 && (
+                <button className="btn btn-outline" onClick={() => setShowAnfangsbestand(true)}>
+                  Anfangsbestand erfassen
+                </button>
+              )}
               <button className="btn btn-primary" onClick={() => setShowNewBooking(true)}>
                 + Neue Buchung
               </button>
@@ -381,6 +386,11 @@ function groupBookings(bookings: Booking[]): Booking[][] {
 
 // ─── Anfangsbestand Modal ────────────────────────────────────────────────────
 
+interface ExistingInitialBalance {
+  exists: boolean;
+  booking: { id: string; bookingDate: string; amount: string; debitCredit: 'S' | 'H' } | null;
+}
+
 function AnfangsbestandModal({
   schoolId, isAdmin, kasseAccount, anfangsbestandAccount, onClose, onCreated,
 }: {
@@ -390,14 +400,39 @@ function AnfangsbestandModal({
   const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [existing, setExisting] = useState<ExistingInitialBalance | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+
+  useEffect(() => {
+    const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
+    api.get<ExistingInitialBalance>(`/bookings/initial-balance${schoolParam}`)
+      .then(setExisting)
+      .catch(() => setExisting({ exists: false, booking: null }));
+  }, [schoolId, isAdmin]);
+
+  const parsedAmount = (() => {
+    const t = amount.trim().replace(',', '.');
+    if (t === '') return NaN;
+    const n = parseFloat(t);
+    return Number.isFinite(n) && n >= 0 ? n : NaN;
+  })();
+  const amountInvalid = Number.isNaN(parsedAmount);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (amountInvalid) {
+      setError('Bitte einen gültigen Betrag eingeben (0,00 ist erlaubt).');
+      return;
+    }
+    if (existing?.exists && !confirmed) {
+      setError('Bitte zuerst die Doppel-Buchung-Warnung bestätigen.');
+      return;
+    }
     setError(''); setLoading(true);
     try {
       const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
       await api.post(`/bookings${schoolParam}`, {
-        amount: parseFloat(amount.replace(',', '.')),
+        amount: parsedAmount,
         debitCredit: 'S',
         accountId: kasseAccount.id,
         counterAccountId: anfangsbestandAccount.id,
@@ -409,16 +444,34 @@ function AnfangsbestandModal({
     } finally { setLoading(false); }
   };
 
+  const existingDateLabel = existing?.booking
+    ? new Date(existing.booking.bookingDate).toLocaleDateString('de-DE')
+    : '';
+  const existingAmountLabel = existing?.booking
+    ? parseFloat(existing.booking.amount).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
+    : '';
+
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="anfang-title">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
           <h2 id="anfang-title" style={{ marginBottom: '0.5rem' }}>Anfangsbestand erfassen</h2>
           <p className="text-light" style={{ fontSize: '0.9rem' }}>
-            Dies ist die erste Buchung für diese Kasse.<br />
-            Bitte geben Sie den aktuellen Kassenbestand ein.
+            Bitte geben Sie den aktuellen Kassenbestand ein.<br />
+            <span style={{ fontSize: '0.8rem' }}>Auch 0,00&nbsp;EUR ist möglich.</span>
           </p>
         </div>
+        {existing?.exists && (
+          <div className="alert alert-warning" role="alert" style={{ marginBottom: '1rem' }}>
+            <strong>Achtung:</strong> Für diesen Mandanten wurde bereits am {existingDateLabel} ein
+            Anfangsbestand von {existingAmountLabel} erfasst. Eine erneute Buchung kann zu
+            doppelten Beträgen führen.
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', fontWeight: 500 }}>
+              <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+              Ich möchte trotzdem einen weiteren Anfangsbestand buchen.
+            </label>
+          </div>
+        )}
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
@@ -431,8 +484,9 @@ function AnfangsbestandModal({
             </div>
           </div>
           <div className="modal-actions">
-            <button type="button" className="btn btn-outline" onClick={onClose}>Überspringen</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
+            <button type="button" className="btn btn-outline" onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn btn-primary"
+              disabled={loading || amountInvalid || (existing?.exists === true && !confirmed)}>
               {loading ? 'Wird erfasst...' : 'Anfangsbestand buchen'}
             </button>
           </div>

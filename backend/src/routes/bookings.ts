@@ -202,6 +202,25 @@ bookingsRouter.get('/pdf', async (req: Request, res: Response) => {
   }
 });
 
+bookingsRouter.get('/initial-balance', async (req: Request, res: Response) => {
+  try {
+    const schoolId = getSchoolScope(req);
+    if (!schoolId) {
+      res.status(400).json({ error: 'Mandant muss angegeben werden' });
+      return;
+    }
+    const existing = await prisma.booking.findFirst({
+      where: { schoolId, description: 'Anfangsbestand', isStorno: false },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, bookingDate: true, amount: true, debitCredit: true },
+    });
+    res.json({ exists: !!existing, booking: existing });
+  } catch (err) {
+    console.error('GET /bookings/initial-balance error:', err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
+
 // GET /bookings/has-bookings - must be before /:id routes
 bookingsRouter.get('/has-bookings', async (req: Request, res: Response) => {
   try {
@@ -219,7 +238,7 @@ bookingsRouter.get('/has-bookings', async (req: Request, res: Response) => {
 });
 
 const createBookingSchema = z.object({
-  amount: z.number().positive(),
+  amount: z.number().nonnegative(),
   debitCredit: z.enum(['S', 'H']),
   accountId: z.string().uuid(),
   counterAccountId: z.string().uuid(),
