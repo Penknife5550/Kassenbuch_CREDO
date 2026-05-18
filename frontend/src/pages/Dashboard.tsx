@@ -398,6 +398,7 @@ function AnfangsbestandModal({
   onClose: () => void; onCreated: () => void;
 }) {
   const [amount, setAmount] = useState('');
+  const [bookingDate, setBookingDate] = useState(getTodayString());
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [existing, setExisting] = useState<ExistingInitialBalance | null>(null);
@@ -424,6 +425,10 @@ function AnfangsbestandModal({
       setError('Bitte einen gültigen Betrag eingeben (0,00 ist erlaubt).');
       return;
     }
+    if (!bookingDate) {
+      setError('Bitte ein Buchungsdatum auswählen.');
+      return;
+    }
     if (existing?.exists && !confirmed) {
       setError('Bitte zuerst die Doppel-Buchung-Warnung bestätigen.');
       return;
@@ -437,6 +442,7 @@ function AnfangsbestandModal({
         accountId: kasseAccount.id,
         counterAccountId: anfangsbestandAccount.id,
         description: 'Anfangsbestand',
+        bookingDate,
       });
       onCreated();
     } catch (e) {
@@ -474,6 +480,11 @@ function AnfangsbestandModal({
         )}
         {error && <div className="alert alert-error" role="alert">{error}</div>}
         <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="anfangBookingDate">Buchungsdatum</label>
+            <input id="anfangBookingDate" type="date" className="form-control" value={bookingDate}
+              max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
+          </div>
           <div className="form-group">
             <label htmlFor="anfangAmount">Anfangsbestand (EUR)</label>
             <input id="anfangAmount" type="text" className="form-control" value={amount}
