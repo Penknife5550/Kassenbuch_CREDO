@@ -78,7 +78,7 @@ export function Layout({ children }: { children: ReactNode }) {
         {user?.role === 'ADMIN' && (
           <>
             <NavLink to="/admin/kassenstatus" active={isActive('/admin/kassenstatus')}>Kassenstatus</NavLink>
-            <NavLink to="/admin/schulen" active={isActive('/admin/schulen')}>Schulen</NavLink>
+            <NavLink to="/admin/schulen" active={isActive('/admin/schulen')}>Mandant</NavLink>
             <NavLink to="/admin/benutzer" active={isActive('/admin/benutzer')}>Benutzer</NavLink>
             <NavLink to="/admin/konten" active={isActive('/admin/konten')}>Konten</NavLink>
             <NavLink to="/admin/kostenstellen" active={isActive('/admin/kostenstellen')}>Kostenstellen</NavLink>
