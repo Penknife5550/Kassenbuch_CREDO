@@ -44,7 +44,7 @@ export function KassenStatus() {
 
       {!loading && data.length === 0 && !error && (
         <div className="card text-center" style={{ padding: '3rem' }}>
-          <p className="text-light">Keine aktiven Schulen gefunden.</p>
+          <p className="text-light">Keine aktiven Mandanten gefunden.</p>
         </div>
       )}
 
@@ -53,7 +53,7 @@ export function KassenStatus() {
           {/* Summary Cards */}
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             <div className="card" style={{ flex: 1, minWidth: '160px', padding: '1rem', textAlign: 'center' }}>
-              <div className="text-light" style={{ fontSize: '0.75rem' }}>Schulen gesamt</div>
+              <div className="text-light" style={{ fontSize: '0.75rem' }}>Mandanten gesamt</div>
               <div style={{ fontSize: '2rem', fontWeight: 700 }}>{data.length}</div>
             </div>
             <div className="card" style={{ flex: 1, minWidth: '160px', padding: '1rem', textAlign: 'center' }}>
@@ -87,7 +87,7 @@ export function KassenStatus() {
               <table>
                 <thead>
                   <tr>
-                    <th>Schule</th>
+                    <th>Mandant</th>
                     <th className="text-right">Kassenbestand</th>
                     <th>Letzte Buchung</th>
                     <th>Letzter Abschluss</th>

@@ -65,6 +65,44 @@ bookingsRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
+bookingsRouter.get('/text-suggestions', async (req: Request, res: Response) => {
+  try {
+    const schoolId = getSchoolScope(req);
+    if (!schoolId) {
+      res.status(400).json({ error: 'Mandant muss angegeben werden' });
+      return;
+    }
+
+    const counterAccountId = req.query.counterAccountId as string | undefined;
+    if (!counterAccountId || !z.string().uuid().safeParse(counterAccountId).success) {
+      res.json({ suggestions: [] });
+      return;
+    }
+
+    const rows = await prisma.booking.findMany({
+      where: { schoolId, counterAccountId, isStorno: false },
+      select: { description: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    const seen = new Set<string>();
+    const suggestions: string[] = [];
+    for (const r of rows) {
+      const t = r.description.trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      suggestions.push(t);
+      if (suggestions.length >= 5) break;
+    }
+
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('GET /bookings/text-suggestions error:', err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
+
 bookingsRouter.get('/balance', async (req: Request, res: Response) => {
   try {
     const schoolId = getSchoolScope(req);

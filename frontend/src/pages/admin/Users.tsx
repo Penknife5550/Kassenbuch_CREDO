@@ -106,9 +106,9 @@ export function Users() {
             </div>
             {form.role === 'USER' && (
               <div className="form-group">
-                <label htmlFor="uSchool">Schule</label>
+                <label htmlFor="uSchool">Mandant</label>
                 <select id="uSchool" className="form-control" value={form.schoolId || ''} onChange={(e) => setForm({ ...form, schoolId: e.target.value })} required>
-                  <option value="">Schule wählen...</option>
+                  <option value="">Mandant wählen...</option>
                   {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
@@ -125,7 +125,7 @@ export function Users() {
         <div className="table-wrapper">
           <table>
             <thead>
-              <tr><th>Benutzername</th><th>Anzeigename</th><th>Rolle</th><th>Schule</th><th>Status</th><th><span className="sr-only">Aktionen</span></th></tr>
+              <tr><th>Benutzername</th><th>Anzeigename</th><th>Rolle</th><th>Mandant</th><th>Status</th><th><span className="sr-only">Aktionen</span></th></tr>
             </thead>
             <tbody>
               {users.map((u) => (

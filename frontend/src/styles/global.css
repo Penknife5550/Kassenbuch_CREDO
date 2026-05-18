@@ -132,6 +132,7 @@ a {
   flex-direction: column;
   gap: 0.375rem;
   margin-bottom: 1rem;
+  min-width: 0;
 }
 
 .form-group label {
@@ -141,6 +142,8 @@ a {
 }
 
 .form-control {
+  width: 100%;
+  min-width: 0;
   padding: 0.625rem 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -297,10 +300,11 @@ tr:hover td {
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   padding: 2rem;
-  max-width: 600px;
+  max-width: 680px;
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .modal h2 {

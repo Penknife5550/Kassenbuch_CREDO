@@ -1,36 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../api/client';
+import {
+  DndContext, DragEndEvent, PointerSensor, KeyboardSensor, useSensor, useSensors, closestCenter,
+} from '@dnd-kit/core';
+import {
+  SortableContext, horizontalListSortingStrategy, arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import {
+  ColumnId, COLUMN_DEFS, DEFAULT_COLUMN_ORDER, validateColumnOrder,
+  renderCell, renderCellStyle, SortableTh, Booking,
+} from './dashboard-columns';
 
 interface Account {
   id: string;
   accountNumber: string;
   name: string;
   type: string;
+  defaultCostCenterId: string | null;
 }
 
 interface CostCenter {
   id: string;
   code: string;
   name: string;
-}
-
-interface Booking {
-  id: string;
-  receiptNumber: number;
-  bookingDate: string;
-  amount: string;
-  debitCredit: 'S' | 'H';
-  description: string;
-  isStorno: boolean;
-  isFinalized: boolean;
-  splitGroupId: string | null;
-  account: { accountNumber: string; name: string };
-  counterAccount: { accountNumber: string; name: string };
-  costCenter: { code: string; name: string } | null;
-  createdBy: { displayName: string };
-  stornoOf: { receiptNumber: number } | null;
-  stornoBookings?: { id: string }[];
 }
 
 interface BookingsResponse {
@@ -47,6 +41,7 @@ interface School {
   code: string;
   anfangsbestandAccountId: string | null;
   kassendifferenzAccountId: string | null;
+  defaultBookingDateMode: 'TODAY' | 'EMPTY';
 }
 
 interface DailyStatus {
@@ -110,6 +105,37 @@ export function Dashboard() {
   // Get the selected school object for configured account IDs
   const selectedSchoolObj = schools.find((s) => s.id === selectedSchool);
 
+  // Column order: user-preference override > server-side stored > default
+  const serverOrder = validateColumnOrder(user?.tableColumnOrder);
+  const [columnOverride, setColumnOverride] = useState<ColumnId[] | null>(null);
+  const columnOrder: ColumnId[] = columnOverride ?? serverOrder ?? DEFAULT_COLUMN_ORDER;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
+
+  const handleColumnDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = columnOrder.indexOf(active.id as ColumnId);
+    const newIndex = columnOrder.indexOf(over.id as ColumnId);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const previous = columnOrder;
+    const next = arrayMove(columnOrder, oldIndex, newIndex);
+    setColumnOverride(next);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      api.put('/auth/preferences', { tableColumnOrder: next }).catch((e) => {
+        console.error('Spaltenreihenfolge konnte nicht gespeichert werden:', e);
+        setColumnOverride(previous);
+      });
+    }, 400);
+  };
+
   useEffect(() => {
     api.get<School[]>('/schools').then((s) => {
       setSchools(s);
@@ -172,9 +198,9 @@ export function Dashboard() {
               className="form-control"
               value={selectedSchool}
               onChange={(e) => { setSelectedSchool(e.target.value); setPage(1); }}
-              aria-label="Schule auswählen"
+              aria-label="Mandant auswählen"
             >
-              <option value="">Schule wählen...</option>
+              <option value="">Mandant wählen...</option>
               {schools.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
@@ -226,76 +252,39 @@ export function Dashboard() {
       {data && data.bookings.length > 0 && (
         <div className="card">
           <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Beleg-Nr.</th>
-                  <th>Datum</th>
-                  <th>Buchungstext</th>
-                  <th>Konto</th>
-                  <th>Gegenkonto</th>
-                  <th>KSt</th>
-                  <th className="text-right">Einnahme</th>
-                  <th className="text-right">Ausgabe</th>
-                  <th>Status</th>
-                  <th>Gebucht von</th>
-                  <th><span className="sr-only">Aktionen</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedBookings.map((group) => {
-                  const isSplit = group.length > 1;
-                  return group.map((b, idx) => (
-                    <tr key={b.id} style={{ opacity: b.isStorno ? 0.6 : 1 }}>
-                      <td style={{ fontWeight: 600 }}>
-                        {isSplit ? (
-                          idx === 0
-                            ? <span title="Splittbuchung">{b.receiptNumber} <span style={{ fontSize: '0.7rem', color: 'var(--color-primary)', verticalAlign: 'super' }}>Split</span></span>
-                            : <span style={{ paddingLeft: '0.75rem', color: 'var(--color-text-light)', fontSize: '0.8rem' }}>\u2514 {b.receiptNumber}</span>
-                        ) : b.receiptNumber}
-                      </td>
-                      <td>{new Date(b.bookingDate).toLocaleDateString('de-DE')}</td>
-                      <td>
-                        {b.description}
-                        {b.stornoOf && (
-                          <span className="text-light" style={{ fontSize: '0.75rem' }}>
-                            {' '}(Storno von #{b.stornoOf.receiptNumber})
-                          </span>
-                        )}
-                      </td>
-                      <td>{b.account.accountNumber}</td>
-                      <td>{b.counterAccount.accountNumber}</td>
-                      <td>{b.costCenter?.code || '\u2013'}</td>
-                      <td className="text-right" style={{ color: 'var(--color-success)' }}>
-                        {b.debitCredit === 'S'
-                          ? parseFloat(b.amount).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
-                          : ''}
-                      </td>
-                      <td className="text-right" style={{ color: 'var(--color-error)' }}>
-                        {b.debitCredit === 'H'
-                          ? parseFloat(b.amount).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
-                          : ''}
-                      </td>
-                      <td>
-                        {b.isStorno && <span className="badge badge-storno">Storno</span>}
-                        {b.isFinalized && <span className="badge badge-finalized">Festgeschrieben</span>}
-                      </td>
-                      <td>{b.createdBy.displayName}</td>
-                      <td>
-                        {!b.isStorno && !b.isFinalized && idx === 0 && (
-                          <button
-                            className="btn btn-sm btn-danger"
-                            onClick={() => handleStorno(b.id)}
-                          >
-                            Storno{isSplit ? ' (alle)' : ''}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ));
-                })}
-              </tbody>
-            </table>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleColumnDragEnd}>
+              <table>
+                <thead>
+                  <tr>
+                    <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                      {columnOrder.map((colId) => (
+                        <SortableTh key={colId} id={colId} align={COLUMN_DEFS[colId].align}>
+                          {colId === 'actions'
+                            ? <span className="sr-only">Aktionen</span>
+                            : COLUMN_DEFS[colId].label}
+                        </SortableTh>
+                      ))}
+                    </SortableContext>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupedBookings.map((group) => {
+                    const isSplit = group.length > 1;
+                    return group.map((b, idx) => (
+                      <tr key={b.id} style={{ opacity: b.isStorno ? 0.6 : 1 }}>
+                        {columnOrder.map((colId) => (
+                          <td key={colId}
+                            className={COLUMN_DEFS[colId].align === 'right' ? 'text-right' : undefined}
+                            style={renderCellStyle(colId)}>
+                            {renderCell(colId, b, isSplit, idx, handleStorno)}
+                          </td>
+                        ))}
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            </DndContext>
           </div>
           {data.totalPages > 1 && (
             <div className="flex-between mt-2">
@@ -324,7 +313,7 @@ export function Dashboard() {
 
       {!selectedSchool && (
         <div className="card text-center" style={{ padding: '3rem' }}>
-          <p className="text-light">Bitte wählen Sie eine Schule aus.</p>
+          <p className="text-light">Bitte wählen Sie einen Mandanten aus.</p>
         </div>
       )}
 
@@ -351,6 +340,7 @@ export function Dashboard() {
           kasseAccounts={kasseAccounts}
           gegenAccounts={gegenAccounts}
           costCenters={costCenters}
+          dateMode={selectedSchoolObj?.defaultBookingDateMode ?? 'TODAY'}
           onClose={() => setShowNewBooking(false)}
           onCreated={() => { setShowNewBooking(false); loadBookings(); }}
         />
@@ -467,18 +457,18 @@ function emptySplitLine(): SplitLine {
 }
 
 function NewBookingModal({
-  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, onClose, onCreated,
+  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode, onClose, onCreated,
 }: {
   schoolId: string; isAdmin: boolean; kasseAccounts: Account[]; gegenAccounts: Account[];
-  costCenters: CostCenter[]; onClose: () => void; onCreated: () => void;
+  costCenters: CostCenter[]; dateMode: 'TODAY' | 'EMPTY'; onClose: () => void; onCreated: () => void;
 }) {
   const [mode, setMode] = useState<'single' | 'split'>('single');
 
   // Shared fields
   const [amount, setAmount] = useState('');
-  const [debitCredit, setDebitCredit] = useState<'S' | 'H'>('S');
+  const [debitCredit, setDebitCredit] = useState<'S' | 'H'>('H');
   const [accountId, setAccountId] = useState(kasseAccounts[0]?.id || '');
-  const [bookingDate, setBookingDate] = useState(getTodayString());
+  const [bookingDate, setBookingDate] = useState(dateMode === 'TODAY' ? getTodayString() : '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -490,12 +480,38 @@ function NewBookingModal({
   // Split mode fields
   const [splitLines, setSplitLines] = useState<SplitLine[]>([emptySplitLine(), emptySplitLine()]);
 
+  // Buchungstext-Vorschläge basierend auf Gegenkonto
+  const [descSuggestions, setDescSuggestions] = useState<string[]>([]);
+  useEffect(() => {
+    if (!counterAccountId) { setDescSuggestions([]); return; }
+    let cancelled = false;
+    const params = new URLSearchParams({ counterAccountId });
+    if (isAdmin && schoolId) params.set('schoolId', schoolId);
+    api.get<{ suggestions: string[] }>(`/bookings/text-suggestions?${params.toString()}`)
+      .then((r) => { if (!cancelled) setDescSuggestions(r.suggestions); })
+      .catch(() => { if (!cancelled) setDescSuggestions([]); });
+    return () => { cancelled = true; };
+  }, [counterAccountId, schoolId, isAdmin]);
+
   const splitSum = splitLines.reduce((s, l) => s + (parseFloat(l.amount.replace(',', '.')) || 0), 0);
   const totalAmount = parseFloat(amount.replace(',', '.')) || 0;
   const splitRemaining = totalAmount - splitSum;
 
   const updateSplitLine = (idx: number, field: keyof SplitLine, value: string) => {
     setSplitLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+  };
+
+  const handleCounterAccountChange = (accountId: string) => {
+    setCounterAccountId(accountId);
+    const acc = gegenAccounts.find((a) => a.id === accountId);
+    setCostCenterId(acc?.defaultCostCenterId ?? '');
+  };
+
+  const handleSplitCounterAccountChange = (idx: number, accountId: string) => {
+    const acc = gegenAccounts.find((a) => a.id === accountId);
+    setSplitLines((prev) => prev.map((l, i) =>
+      i === idx ? { ...l, counterAccountId: accountId, costCenterId: acc?.defaultCostCenterId ?? '' } : l
+    ));
   };
 
   const addSplitLine = () => setSplitLines((prev) => [...prev, emptySplitLine()]);
@@ -578,8 +594,8 @@ function NewBookingModal({
               <label htmlFor="debitCredit">Art</label>
               <select id="debitCredit" className="form-control" value={debitCredit}
                 onChange={(e) => setDebitCredit(e.target.value as 'S' | 'H')}>
-                <option value="S">Einnahme (Soll)</option>
                 <option value="H">Ausgabe (Haben)</option>
+                <option value="S">Einnahme (Soll)</option>
               </select>
             </div>
           </div>
@@ -608,7 +624,7 @@ function NewBookingModal({
                 <div className="form-group">
                   <label htmlFor="counterAccountId">Gegenkonto</label>
                   <select id="counterAccountId" className="form-control" value={counterAccountId}
-                    onChange={(e) => setCounterAccountId(e.target.value)} required>
+                    onChange={(e) => handleCounterAccountChange(e.target.value)} required>
                     <option value="">Gegenkonto wählen...</option>
                     {gegenAccounts.map((a) => (
                       <option key={a.id} value={a.id}>{a.accountNumber} – {a.name}</option>
@@ -630,7 +646,10 @@ function NewBookingModal({
                 <label htmlFor="description">Buchungstext</label>
                 <input id="description" type="text" className="form-control" value={description}
                   onChange={(e) => setDescription(e.target.value)} placeholder="z.B. Büromaterial"
-                  maxLength={500} required />
+                  maxLength={500} required list="desc-suggestions" autoComplete="off" />
+                <datalist id="desc-suggestions">
+                  {descSuggestions.map((s, i) => <option key={i} value={s} />)}
+                </datalist>
               </div>
             </>
           )}
@@ -674,7 +693,7 @@ function NewBookingModal({
                       <div className="form-group" style={{ marginBottom: '0.4rem' }}>
                         <label style={{ fontSize: '0.75rem' }}>Gegenkonto</label>
                         <select className="form-control" value={line.counterAccountId}
-                          onChange={(e) => updateSplitLine(idx, 'counterAccountId', e.target.value)}
+                          onChange={(e) => handleSplitCounterAccountChange(idx, e.target.value)}
                           required style={{ padding: '0.35rem 0.5rem' }}>
                           <option value="">Gegenkonto...</option>
                           {gegenAccounts.map((a) => (

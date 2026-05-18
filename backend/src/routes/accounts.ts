@@ -47,13 +47,28 @@ const accountSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   type: z.enum(['KASSE', 'TRANSIT', 'GEGENKONTO']),
+  defaultCostCenterId: z.string().uuid().nullable().optional(),
 });
+
+async function validateDefaultCostCenter(id: string | null | undefined): Promise<string | null> {
+  if (!id) return null;
+  const cc = await prisma.costCenter.findUnique({ where: { id }, select: { isActive: true } });
+  if (!cc) return 'Kostenstelle nicht gefunden';
+  if (!cc.isActive) return 'Kostenstelle ist inaktiv';
+  return null;
+}
 
 accountsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {
   try {
     const parsed = accountSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Ungültige Daten', details: parsed.error.flatten() });
+      return;
+    }
+
+    const ccError = await validateDefaultCostCenter(parsed.data.defaultCostCenterId);
+    if (ccError) {
+      res.status(400).json({ error: ccError });
       return;
     }
 
@@ -152,6 +167,14 @@ accountsRouter.put('/:id', requireAdmin, async (req: Request, res: Response) => 
     if (!existing) {
       res.status(404).json({ error: 'Konto nicht gefunden' });
       return;
+    }
+
+    if (parsed.data.defaultCostCenterId !== undefined) {
+      const ccError = await validateDefaultCostCenter(parsed.data.defaultCostCenterId);
+      if (ccError) {
+        res.status(400).json({ error: ccError });
+        return;
+      }
     }
 
     const account = await prisma.account.update({

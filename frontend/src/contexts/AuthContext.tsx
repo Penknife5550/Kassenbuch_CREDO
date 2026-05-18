@@ -7,6 +7,7 @@ interface User {
   displayName: string;
   role: 'ADMIN' | 'USER';
   schoolId: string | null;
+  tableColumnOrder: string[] | null;
   school: {
     id: string;
     name: string;
@@ -14,6 +15,7 @@ interface User {
     kasseAccountId: string | null;
     anfangsbestandAccountId: string | null;
     kassendifferenzAccountId: string | null;
+    defaultBookingDateMode: 'TODAY' | 'EMPTY';
   } | null;
 }
 

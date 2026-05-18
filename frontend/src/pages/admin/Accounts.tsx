@@ -8,6 +8,14 @@ interface Account {
   description: string | null;
   type: 'KASSE' | 'TRANSIT' | 'GEGENKONTO';
   isActive: boolean;
+  defaultCostCenterId: string | null;
+}
+
+interface CostCenter {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
 }
 
 interface School {
@@ -28,10 +36,11 @@ const TYPE_LABELS: Record<string, string> = {
 export function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [filter, setFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
-  const [form, setForm] = useState({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO' as Account['type'] });
+  const [form, setForm] = useState({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO' as Account['type'], defaultCostCenterId: '' });
   const [error, setError] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [schoolSettingsMsg, setSchoolSettingsMsg] = useState('');
@@ -39,6 +48,7 @@ export function Accounts() {
   const load = () => {
     api.get<Account[]>('/accounts').then(setAccounts);
     api.get<School[]>('/schools').then(setSchools);
+    api.get<CostCenter[]>('/cost-centers').then(setCostCenters);
   };
   useEffect(() => { load(); }, []);
 
@@ -46,7 +56,7 @@ export function Accounts() {
   const gegenkonten = accounts.filter((a) => a.type === 'GEGENKONTO');
 
   const resetForm = () => {
-    setForm({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO' });
+    setForm({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO', defaultCostCenterId: '' });
     setEditing(null); setShowForm(false); setError('');
   };
 
@@ -54,7 +64,11 @@ export function Accounts() {
     e.preventDefault();
     setError('');
     try {
-      const data = { ...form, description: form.description || undefined };
+      const data = {
+        ...form,
+        description: form.description || undefined,
+        defaultCostCenterId: form.defaultCostCenterId || null,
+      };
       if (editing) {
         await api.put(`/accounts/${editing.id}`, data);
       } else {
@@ -79,7 +93,13 @@ export function Accounts() {
 
   const startEdit = (a: Account) => {
     setEditing(a);
-    setForm({ accountNumber: a.accountNumber, name: a.name, description: a.description || '', type: a.type });
+    setForm({
+      accountNumber: a.accountNumber,
+      name: a.name,
+      description: a.description || '',
+      type: a.type,
+      defaultCostCenterId: a.defaultCostCenterId || '',
+    });
     setShowForm(true);
   };
 
@@ -129,6 +149,20 @@ export function Accounts() {
               <label htmlFor="accDesc">Beschreibung (optional)</label>
               <input id="accDesc" className="form-control" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
+            <div className="form-group">
+              <label htmlFor="accDefCc">Standard-Kostenstelle (optional)</label>
+              <select id="accDefCc" className="form-control"
+                value={form.defaultCostCenterId}
+                onChange={(e) => setForm({ ...form, defaultCostCenterId: e.target.value })}>
+                <option value="">Keine Standard-Kostenstelle</option>
+                {costCenters.filter((cc) => cc.isActive).map((cc) => (
+                  <option key={cc.id} value={cc.id}>{cc.code} – {cc.name}</option>
+                ))}
+              </select>
+              <div className="text-light" style={{ fontSize: '0.75rem', marginTop: '4px' }}>
+                Wird beim Auswählen dieses Kontos als Gegenkonto automatisch in der Buchungsmaske vorbelegt.
+              </div>
+            </div>
             <div className="flex-gap">
               <button type="submit" className="btn btn-primary">{editing ? 'Speichern' : 'Anlegen'}</button>
               <button type="button" className="btn btn-outline" onClick={resetForm}>Abbrechen</button>
@@ -171,10 +205,10 @@ export function Accounts() {
         </div>
       </div>
 
-      {/* Schuleinstellungen: konfigurierbare Standard-Konten */}
+      {/* Mandanteneinstellungen: konfigurierbare Standard-Konten */}
       {schools.length > 0 && (
         <div className="card">
-          <h2 style={{ marginBottom: '0.5rem' }}>Kontoeinstellungen je Schule</h2>
+          <h2 style={{ marginBottom: '0.5rem' }}>Kontoeinstellungen je Mandant</h2>
           <p className="text-light" style={{ fontSize: '0.85rem', marginBottom: '1.5rem' }}>
             Legen Sie fest, welches Gegenkonto für den Anfangsbestand und für Kassendifferenzen verwendet wird.
           </p>
@@ -187,7 +221,7 @@ export function Accounts() {
             <table>
               <thead>
                 <tr>
-                  <th>Schule</th>
+                  <th>Mandant</th>
                   <th>Konto Anfangsbestand</th>
                   <th>Konto Kassendifferenz</th>
                 </tr>

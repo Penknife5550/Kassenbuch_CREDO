@@ -65,6 +65,7 @@ const schoolSchema = z.object({
   kasseAccountId: z.string().uuid().nullable().optional(),
   anfangsbestandAccountId: z.string().uuid().nullable().optional(),
   kassendifferenzAccountId: z.string().uuid().nullable().optional(),
+  defaultBookingDateMode: z.enum(['TODAY', 'EMPTY']).optional(),
 });
 
 schoolsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {

@@ -136,9 +136,9 @@ export function DatevExport() {
         <h2 style={{ marginBottom: '1rem' }}>Buchungsstapel exportieren</h2>
         <div className="grid-2">
           <div className="form-group">
-            <label htmlFor="exportSchool">Schule</label>
+            <label htmlFor="exportSchool">Mandant</label>
             <select id="exportSchool" className="form-control" value={exportSchool} onChange={(e) => setExportSchool(e.target.value)}>
-              <option value="">Schule wählen...</option>
+              <option value="">Mandant wählen...</option>
               {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>

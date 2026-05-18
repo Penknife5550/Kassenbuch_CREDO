@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prismaClient';
 import { config } from '../config';
 import { authenticate, AuthPayload } from '../middleware/auth';
@@ -94,6 +95,7 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
       displayName: user.displayName,
       role: user.role,
       schoolId: user.schoolId,
+      tableColumnOrder: user.tableColumnOrder,
       school: user.school ? {
         id: user.school.id,
         name: user.school.name,
@@ -101,10 +103,40 @@ authRouter.get('/me', authenticate, async (req: Request, res: Response) => {
         kasseAccountId: user.school.kasseAccountId,
         anfangsbestandAccountId: user.school.anfangsbestandAccountId,
         kassendifferenzAccountId: user.school.kassendifferenzAccountId,
+        defaultBookingDateMode: user.school.defaultBookingDateMode,
       } : null,
     });
   } catch (err) {
     console.error('GET /auth/me error:', err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
+
+const TABLE_COLUMN_IDS = [
+  'receiptNumber', 'date', 'description', 'account', 'counterAccount',
+  'costCenter', 'einnahme', 'ausgabe', 'status', 'createdBy', 'actions',
+] as const;
+
+const preferencesSchema = z.object({
+  tableColumnOrder: z.array(z.enum(TABLE_COLUMN_IDS)).max(TABLE_COLUMN_IDS.length).nullable(),
+});
+
+authRouter.put('/preferences', authenticate, async (req: Request, res: Response) => {
+  try {
+    const parsed = preferencesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Ungültige Daten', details: parsed.error.flatten() });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: { tableColumnOrder: parsed.data.tableColumnOrder ?? Prisma.JsonNull },
+    });
+
+    res.json({ tableColumnOrder: parsed.data.tableColumnOrder });
+  } catch (err) {
+    console.error('PUT /auth/preferences error:', err);
     res.status(500).json({ error: 'Interner Serverfehler' });
   }
 });

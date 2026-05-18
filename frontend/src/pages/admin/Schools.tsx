@@ -15,6 +15,7 @@ interface School {
   isActive: boolean;
   kasseAccountId: string | null;
   kasseAccount: KasseAccountRef | null;
+  defaultBookingDateMode: 'TODAY' | 'EMPTY';
 }
 
 interface Account {
@@ -33,6 +34,7 @@ export function Schools() {
   const [code, setCode] = useState('');
   const [address, setAddress] = useState('');
   const [kasseAccountId, setKasseAccountId] = useState('');
+  const [defaultBookingDateMode, setDefaultBookingDateMode] = useState<'TODAY' | 'EMPTY'>('TODAY');
   const [error, setError] = useState('');
 
   const load = () => api.get<School[]>('/schools').then(setSchools);
@@ -43,6 +45,7 @@ export function Schools() {
 
   const resetForm = () => {
     setName(''); setCode(''); setAddress(''); setKasseAccountId('');
+    setDefaultBookingDateMode('TODAY');
     setEditing(null); setShowForm(false); setError('');
   };
 
@@ -50,7 +53,7 @@ export function Schools() {
     e.preventDefault();
     setError('');
     try {
-      const data = { name, code, address: address || undefined, kasseAccountId: kasseAccountId || null };
+      const data = { name, code, address: address || undefined, kasseAccountId: kasseAccountId || null, defaultBookingDateMode };
       if (editing) {
         await api.put(`/schools/${editing.id}`, data);
       } else {
@@ -65,11 +68,13 @@ export function Schools() {
 
   const startEdit = (s: School) => {
     setEditing(s); setName(s.name); setCode(s.code); setAddress(s.address || '');
-    setKasseAccountId(s.kasseAccountId || ''); setShowForm(true);
+    setKasseAccountId(s.kasseAccountId || '');
+    setDefaultBookingDateMode(s.defaultBookingDateMode ?? 'TODAY');
+    setShowForm(true);
   };
 
   const handleDelete = async (s: School) => {
-    if (!window.confirm(`Schule "${s.name}" (${s.code}) wirklich löschen?\n\nAlle zugeordneten Benutzer werden ebenfalls gelöscht!`)) return;
+    if (!window.confirm(`Mandant "${s.name}" (${s.code}) wirklich löschen?\n\nAlle zugeordneten Benutzer werden ebenfalls gelöscht!`)) return;
     setError('');
     try {
       await api.del(`/schools/${s.id}`);
@@ -82,9 +87,9 @@ export function Schools() {
   return (
     <div>
       <div className="flex-between mb-3">
-        <h1>Schulen verwalten</h1>
+        <h1>Mandanten verwalten</h1>
         <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
-          + Neue Schule
+          + Neuer Mandant
         </button>
       </div>
 
@@ -92,7 +97,7 @@ export function Schools() {
 
       {showForm && (
         <div className="card mb-3">
-          <h2 style={{ marginBottom: '1rem' }}>{editing ? 'Schule bearbeiten' : 'Neue Schule'}</h2>
+          <h2 style={{ marginBottom: '1rem' }}>{editing ? 'Mandant bearbeiten' : 'Neuer Mandant'}</h2>
           {error && <div className="alert alert-error" role="alert">{error}</div>}
           <form onSubmit={handleSubmit}>
             <div className="grid-2">
@@ -117,6 +122,16 @@ export function Schools() {
                   {kasseAccounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.accountNumber} – {a.name}</option>
                   ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid-2">
+              <div className="form-group">
+                <label htmlFor="dateMode">Buchungsdatum-Vorgabe</label>
+                <select id="dateMode" className="form-control" value={defaultBookingDateMode}
+                  onChange={(e) => setDefaultBookingDateMode(e.target.value as 'TODAY' | 'EMPTY')}>
+                  <option value="TODAY">Heutiges Datum vorbelegen</option>
+                  <option value="EMPTY">Leer lassen (Benutzer wählt selbst)</option>
                 </select>
               </div>
             </div>

@@ -186,14 +186,14 @@ export function DailyClosing() {
       <div>
         <h1>Tagesabschluss</h1>
         <div className="card text-center" style={{ padding: '3rem' }}>
-          <p className="text-light mb-3">Bitte Schule auswählen:</p>
+          <p className="text-light mb-3">Bitte Mandant auswählen:</p>
           <select
             className="form-control"
             style={{ maxWidth: '300px', margin: '0 auto' }}
             value={selectedSchool}
             onChange={(e) => setSelectedSchool(e.target.value)}
           >
-            <option value="">Schule wählen...</option>
+            <option value="">Mandant wählen...</option>
             {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
@@ -217,7 +217,7 @@ export function DailyClosing() {
               setComment('');
             }}
           >
-            <option value="">Schule wählen...</option>
+            <option value="">Mandant wählen...</option>
             {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}

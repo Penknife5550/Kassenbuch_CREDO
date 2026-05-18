@@ -23,6 +23,11 @@ enum AccountType {
   GEGENKONTO
 }
 
+enum BookingDateMode {
+  TODAY
+  EMPTY
+}
+
 model School {
   id                       String   @id @default(uuid())
   name                     String
@@ -31,6 +36,7 @@ model School {
   kasseAccountId           String?  @map("kasse_account_id")
   anfangsbestandAccountId  String?  @map("anfangsbestand_account_id")
   kassendifferenzAccountId String?  @map("kassendifferenz_account_id")
+  defaultBookingDateMode   BookingDateMode @default(TODAY) @map("default_booking_date_mode")
   isActive                 Boolean  @default(true)
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
@@ -51,11 +57,12 @@ model User {
   username     String   @unique
   passwordHash String   @map("password_hash")
   displayName  String   @map("display_name")
-  role         UserRole @default(USER)
-  schoolId     String?  @map("school_id")
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  role             UserRole @default(USER)
+  schoolId         String?  @map("school_id")
+  tableColumnOrder Json?    @map("table_column_order")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   school   School?    @relation(fields: [schoolId], references: [id])
   bookings Booking[]  @relation("BookingCreator")
@@ -67,15 +74,17 @@ model User {
 }
 
 model Account {
-  id            String      @id @default(uuid())
-  accountNumber String      @map("account_number")
-  name          String
-  description   String?
-  type          AccountType
-  isActive      Boolean     @default(true)
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  id                   String      @id @default(uuid())
+  accountNumber        String      @map("account_number")
+  name                 String
+  description          String?
+  type                 AccountType
+  defaultCostCenterId  String?     @map("default_cost_center_id")
+  isActive             Boolean     @default(true)
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
 
+  defaultCostCenter        CostCenter? @relation("AccountDefaultCostCenter", fields: [defaultCostCenterId], references: [id])
   bookingsAsAccount        Booking[] @relation("BookingAccount")
   bookingsAsCounterAccount Booking[] @relation("BookingCounterAccount")
   assignedSchools            School[] @relation("SchoolKasse")
@@ -95,7 +104,8 @@ model CostCenter {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  bookings Booking[]
+  bookings           Booking[]
+  defaultForAccounts Account[] @relation("AccountDefaultCostCenter")
 
   @@map("cost_centers")
 }
