@@ -9,6 +9,7 @@ import { Users } from './pages/admin/Users';
 import { Accounts } from './pages/admin/Accounts';
 import { CostCenters } from './pages/admin/CostCenters';
 import { DatevExport } from './pages/admin/DatevExport';
+import { DmsExport } from './pages/admin/DmsExport';
 import { KassenStatus } from './pages/admin/KassenStatus';
 import { ReactNode } from 'react';
 
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/admin/konten" element={<AdminRoute><Accounts /></AdminRoute>} />
           <Route path="/admin/kostenstellen" element={<AdminRoute><CostCenters /></AdminRoute>} />
           <Route path="/admin/datev" element={<AdminRoute><DatevExport /></AdminRoute>} />
+          <Route path="/admin/dms-export" element={<AdminRoute><DmsExport /></AdminRoute>} />
           <Route path="/admin/kassenstatus" element={<AdminRoute><KassenStatus /></AdminRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

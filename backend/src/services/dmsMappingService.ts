@@ -1,5 +1,6 @@
 import { BookingField, DmsFieldMapping, FieldFormat, FieldSource, Prisma } from '@prisma/client';
 import { prisma } from '../prismaClient';
+import { decimalToNumber } from '../utils/decimal';
 
 // ─── Default-Mapping (verbindlich) ──────────────────────────────────────────
 // Quelle: BELEGE_PLAN.html §5.4 — abgestimmt mit den DMS-Feldnamen.
@@ -22,9 +23,30 @@ export const DEFAULT_DMS_MAPPING: DefaultMappingRow[] = [
   { sortOrder: 50, source: 'BOOKING_FIELD', bookingField: 'COST_CENTER_CODE',  constantValue: null, dmsKey: 'projektnr1',       format: 'RAW',           maxLength: null, includeOnSeparator: true },
   { sortOrder: 60, source: 'CONSTANT',      bookingField: null,                constantValue: '1',  dmsKey: 'sichtid1',          format: null,            maxLength: null, includeOnSeparator: true },
   { sortOrder: 70, source: 'BOOKING_FIELD', bookingField: 'DESCRIPTION',       constantValue: null, dmsKey: 'textindokument',   format: 'RAW',           maxLength: 60,   includeOnSeparator: true },
-  { sortOrder: 80, source: 'BOOKING_FIELD', bookingField: 'ACCOUNT_NUMBER',    constantValue: null, dmsKey: 'Kontonr1',         format: 'RAW',           maxLength: null, includeOnSeparator: true },
-  { sortOrder: 90, source: 'BOOKING_FIELD', bookingField: 'RECEIPT_NUMBER',    constantValue: null, dmsKey: 'belegnr',          format: 'RAW',           maxLength: null, includeOnSeparator: true },
+  { sortOrder: 80, source: 'BOOKING_FIELD', bookingField: 'ACCOUNT_NUMBER',          constantValue: null, dmsKey: 'Kontonr1',         format: 'RAW',           maxLength: null, includeOnSeparator: true },
+  { sortOrder: 81, source: 'BOOKING_FIELD', bookingField: 'COUNTER_ACCOUNT_NUMBER',  constantValue: null, dmsKey: 'Kontonr2',         format: 'RAW',           maxLength: null, includeOnSeparator: true },
+  { sortOrder: 90, source: 'BOOKING_FIELD', bookingField: 'RECEIPT_NUMBER',          constantValue: null, dmsKey: 'belegnr',          format: 'RAW',           maxLength: null, includeOnSeparator: true },
 ];
+
+/**
+ * Idempotent: Fügt Kontonr2 für alle Schools nach, denen es im Mapping noch fehlt.
+ * Bestehende User-Änderungen (Reihenfolge, isActive, maxLength) werden NICHT überschrieben.
+ * Wird beim Backend-Start einmalig ausgeführt.
+ */
+export async function backfillKontonr2Mapping(): Promise<void> {
+  const schoolsWithoutKontonr2 = await prisma.school.findMany({
+    where: { dmsFieldMappings: { none: { dmsKey: 'Kontonr2' } } },
+    select: { id: true },
+  });
+  if (schoolsWithoutKontonr2.length === 0) return;
+  const row = DEFAULT_DMS_MAPPING.find(r => r.dmsKey === 'Kontonr2');
+  if (!row) return;
+  await prisma.dmsFieldMapping.createMany({
+    data: schoolsWithoutKontonr2.map(s => ({ schoolId: s.id, ...row })),
+    skipDuplicates: true,
+  });
+  console.log(`[dmsMapping] Backfill Kontonr2: ${schoolsWithoutKontonr2.length} School(s) ergänzt`);
+}
 
 export async function createDefaultDmsMappingForSchool(schoolId: string): Promise<void> {
   // skipDuplicates greift über das @@unique([schoolId, dmsKey])
@@ -133,9 +155,7 @@ export function resolveField(
     case 'RECEIPT_NUMBER':
       return { raw: `${booking.bookingDate.getFullYear()}-${String(booking.receiptNumber).padStart(5, '0')}` };
     case 'AMOUNT': {
-      const num = typeof booking.amount === 'object' && 'toNumber' in booking.amount
-        ? booking.amount.toNumber()
-        : Number(booking.amount);
+      const num = decimalToNumber(booking.amount);
       return { raw: num.toFixed(2), rawTyped: num };
     }
     case 'DEBIT_CREDIT':           return { raw: booking.debitCredit };

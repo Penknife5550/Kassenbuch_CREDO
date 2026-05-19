@@ -14,6 +14,8 @@ import { adminKassenStatusRouter } from './routes/adminKassenStatus';
 import { belegartenRouter } from './routes/belegarten';
 import { receiptsRouter } from './routes/receipts';
 import { dmsMappingRouter } from './routes/dmsMapping';
+import { dmsExportRouter } from './routes/dmsExport';
+import { backfillKontonr2Mapping } from './services/dmsMappingService';
 
 const app = express();
 
@@ -38,11 +40,26 @@ app.use('/api/admin/kassenstatus', adminKassenStatusRouter);
 app.use('/api/belegarten', belegartenRouter);
 app.use('/api/receipts', receiptsRouter);
 app.use('/api/admin/dms-mapping', dmsMappingRouter);
+app.use('/api/bookings/dms-export', dmsExportRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(config.port, () => {
-  console.log(`Kassenbuch Backend running on port ${config.port}`);
+async function start(): Promise<void> {
+  // Backfill VOR listen() — sonst sehen die ersten Requests nach einem Deploy
+  // ein DMS-Mapping ohne Kontonr2 (Race auf den ersten paar hundert ms).
+  try {
+    await backfillKontonr2Mapping();
+  } catch (err) {
+    console.error('[dmsMapping] Backfill Kontonr2 fehlgeschlagen:', err);
+  }
+  app.listen(config.port, () => {
+    console.log(`Kassenbuch Backend running on port ${config.port}`);
+  });
+}
+
+start().catch(err => {
+  console.error('FATAL: Backend-Start fehlgeschlagen:', err);
+  process.exit(1);
 });

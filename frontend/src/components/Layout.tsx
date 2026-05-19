@@ -83,6 +83,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <NavLink to="/admin/konten" active={isActive('/admin/konten')}>Konten</NavLink>
             <NavLink to="/admin/kostenstellen" active={isActive('/admin/kostenstellen')}>Kostenstellen</NavLink>
             <NavLink to="/admin/datev" active={isActive('/admin/datev')}>DATEV Export</NavLink>
+            <NavLink to="/admin/dms-export" active={isActive('/admin/dms-export')}>DMS Export</NavLink>
           </>
         )}
       </nav>

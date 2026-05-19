@@ -30,3 +30,7 @@ Thumbs.db
 
 # Docker volumes
 pgdata/
+
+# Docker compose lokale Overrides
+docker-compose.override.yml
+docker-compose.override.yaml
