@@ -15,6 +15,10 @@ COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nodejs:nodejs /app/package.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
+# Seed importiert aus ../src/services/* — tsx braucht die TS-Quellen zur Laufzeit.
+# Ohne diese Zeile crasht der Backend-Container bei einer Frisch-Installation
+# (leeres DB-Volume → Seed läuft → Cannot find module '../src/...').
+COPY --from=builder --chown=nodejs:nodejs /app/src ./src
 COPY --chown=nodejs:nodejs assets ./assets
 COPY --chown=nodejs:nodejs docker-entrypoint.sh ./
 RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
