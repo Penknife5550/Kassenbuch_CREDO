@@ -11,6 +11,9 @@ import { bookingsRouter } from './routes/bookings';
 import { dailyClosingRouter } from './routes/dailyClosing';
 import { datevExportRouter } from './routes/datevExport';
 import { adminKassenStatusRouter } from './routes/adminKassenStatus';
+import { belegartenRouter } from './routes/belegarten';
+import { receiptsRouter } from './routes/receipts';
+import { dmsMappingRouter } from './routes/dmsMapping';
 
 const app = express();
 
@@ -32,6 +35,9 @@ app.use('/api/bookings', bookingsRouter);
 app.use('/api/daily-closing', dailyClosingRouter);
 app.use('/api/datev-export', datevExportRouter);
 app.use('/api/admin/kassenstatus', adminKassenStatusRouter);
+app.use('/api/belegarten', belegartenRouter);
+app.use('/api/receipts', receiptsRouter);
+app.use('/api/admin/dms-mapping', dmsMappingRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

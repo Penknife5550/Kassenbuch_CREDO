@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kassenbuch CREDO — Beleg-Upload & DMS-Export — Plan v2</title>
+<style>
+  :root{
+    --bg:#f7f8fa;
+    --surface:#ffffff;
+    --ink:#1a1f2c;
+    --muted:#5b6577;
+    --line:#e3e6ec;
+    --accent:#0a4f8a;
+    --accent-soft:#e7f0f9;
+    --ok:#1f7a3a;
+    --ok-soft:#e6f4ea;
+    --warn:#8a5a00;
+    --warn-soft:#fcf2db;
+    --danger:#8a1a1a;
+    --danger-soft:#fbe6e6;
+    --new:#5e2a8a;
+    --new-soft:#f4dcff;
+    --code-bg:#0f172a;
+    --code-ink:#e2e8f0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px}
+  header.title{margin-bottom:32px;padding-bottom:24px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:8px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 8px;font-weight:700;letter-spacing:-.01em}
+  .lead{color:var(--muted);font-size:16px;margin:0;max-width:74ch}
+  .meta{display:flex;flex-wrap:wrap;gap:18px;margin-top:18px;font-size:13px;color:var(--muted)}
+  .meta b{color:var(--ink);font-weight:600}
+
+  h2{font-size:20px;margin:48px 0 12px;font-weight:700;letter-spacing:-.005em}
+  h2 .num{display:inline-block;width:26px;height:26px;line-height:26px;text-align:center;
+    background:var(--accent);color:#fff;border-radius:6px;font-size:13px;margin-right:10px;vertical-align:2px}
+  h2.new .num{background:var(--new)}
+  h3{font-size:15px;margin:22px 0 8px;font-weight:600;color:var(--ink)}
+  p{margin:8px 0}
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  li::marker{color:var(--muted)}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin:12px 0}
+  .card.highlight{border:1px solid var(--new);background:linear-gradient(180deg,#fbf6ff 0,#fff 60%)}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:720px){.grid-2{grid-template-columns:1fr}}
+
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);
+    padding:12px 16px;border-radius:6px;margin:14px 0;font-size:14.5px}
+  .callout.warn{border-color:#c89a32;background:var(--warn-soft);color:#5a3e00}
+  .callout.ok{border-color:var(--ok);background:var(--ok-soft);color:#0e4c24}
+  .callout.danger{border-color:var(--danger);background:var(--danger-soft);color:#5e1010}
+  .callout.new{border-color:var(--new);background:var(--new-soft);color:#3e1a5e}
+
+  code,pre,.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  code{background:#eef1f6;padding:1px 6px;border-radius:4px;font-size:.88em}
+  pre{background:var(--code-bg);color:var(--code-ink);padding:16px 18px;border-radius:8px;
+    overflow-x:auto;font-size:13px;line-height:1.55;margin:10px 0}
+  pre .c{color:#94a3b8}
+  pre .k{color:#7dd3fc}
+  pre .s{color:#fda4af}
+  pre .n{color:#fcd34d}
+
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-weight:600;background:#f1f4f9;color:var(--ink)}
+  td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
+    background:#eef1f6;color:var(--muted);font-weight:600;letter-spacing:.04em;margin-right:4px}
+  .tag.api{background:#dceeff;color:#0a4f8a}
+  .tag.db{background:#f4dcff;color:#5e2a8a}
+  .tag.ui{background:#dcffe7;color:#0e7a3a}
+  .tag.sec{background:#ffe0d6;color:#8a3a10}
+  .tag.new{background:var(--new);color:#fff}
+  .tag.ok{background:var(--ok);color:#fff}
+
+  .phase{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:14px 16px;border:1px solid var(--line);
+    border-radius:8px;margin:10px 0;background:var(--surface)}
+  .phase .badge{align-self:start;background:var(--accent);color:#fff;font-size:12px;font-weight:700;
+    padding:4px 10px;border-radius:999px;letter-spacing:.04em}
+
+  details{border:1px solid var(--line);border-radius:8px;padding:0 16px;margin:8px 0;background:var(--surface)}
+  details>summary{cursor:pointer;padding:12px 0;font-weight:600;list-style:none}
+  details>summary::-webkit-details-marker{display:none}
+  details[open]{padding-bottom:14px}
+  details>summary::before{content:"▸ ";color:var(--muted)}
+  details[open]>summary::before{content:"▾ "}
+
+  .toc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 20px;margin:18px 0}
+  .toc h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .toc ol{margin:0;columns:2;column-gap:28px;font-size:13.5px}
+  @media (max-width:720px){.toc ol{columns:1}}
+  .toc a{color:var(--ink);text-decoration:none}
+  .toc a:hover{color:var(--accent);text-decoration:underline}
+
+  hr{border:none;border-top:1px solid var(--line);margin:36px 0}
+
+  footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <div class="eyebrow">Feature-Plan v2 · Kassenbuch CREDO</div>
+  <h1>Beleg-Upload + konfigurierbares DMS-Mapping + Sammel-Export</h1>
+  <p class="lead">
+    Jede Buchung kann mehrere Belege (PDF/JPG/PNG) erhalten. Pro Mandant wird konfiguriert,
+    <b>welche Buchungsfelder unter welchem Schlüsselnamen</b> in den Swiss-QR-Code wandern — damit das DMS jede
+    Buchung automatisch zuordnen kann (Datum, Konto, Kostenstelle, Mandantennummer, Belegart, …).
+    Der Admin lädt für einen Zeitraum <b>eine einzige PDF</b> mit QR-Trennseite vor jedem Belegdokument herunter.
+  </p>
+  <div class="meta">
+    <span><b>Stand:</b> 2026-05-19 · v2</span>
+    <span><b>Referenz:</b> CREDO_Finance_Portal_fresh</span>
+    <span><b>Aufwand:</b> ~6–9 PT</span>
+    <span><b>Neu in v2:</b> <span class="tag new">DMS-Feldmapping</span> <span class="tag new">Kein-Beleg-Hinweis</span></span>
+  </div>
+</header>
+
+<nav class="toc">
+  <h3>Inhalt</h3>
+  <ol>
+    <li><a href="#s1">Entscheidungen</a></li>
+    <li><a href="#s2">Datenfluss</a></li>
+    <li><a href="#s3">Datenmodell</a></li>
+    <li><a href="#s4">Backend-Endpoints</a></li>
+    <li><a href="#s5">DMS-Feldmapping ⭐</a></li>
+    <li><a href="#s6">Swiss-QR-Payload</a></li>
+    <li><a href="#s7">Trennseite (Layout)</a></li>
+    <li><a href="#s8">Sammel-Export</a></li>
+    <li><a href="#s9">UI / UX</a></li>
+    <li><a href="#s10">Storage &amp; Sicherheit</a></li>
+    <li><a href="#s11">GoBD / DSGVO</a></li>
+    <li><a href="#s12">Was du ggf. vergessen hast</a></li>
+    <li><a href="#s13">Phasen</a></li>
+    <li><a href="#s14">Offene Fragen</a></li>
+  </ol>
+</nav>
+
+<!-- ====================================================================== -->
+<h2 id="s1"><span class="num">1</span>Entscheidungen</h2>
+<div class="card">
+  <table>
+    <tr><th style="width:36%">Entscheidung</th><th>Konsequenz</th></tr>
+    <tr>
+      <td><b>Belegart</b> = konfigurierbare Liste <b>pro Mandant</b><br>(initial geseedet)</td>
+      <td>Neue Admin-Maske <em>Schulen → Belegarten</em>. Seed: <code>QUITTUNG, RECHNUNG, EIGENBELEG, KASSENBON, KONTOAUSZUG, SONSTIGES</code>. Im Buchungs-Modal als Dropdown (optional, Default aus <code>School.belegartDefaultId</code>).</td>
+    </tr>
+    <tr>
+      <td><b>1:n Belege pro Buchung</b></td>
+      <td>Tabelle <code>booking_receipt</code>. Pro Belegdatei eine eigene QR-Trennseite.</td>
+    </tr>
+    <tr>
+      <td><b>Neues Feld <code>dmsMandantenNummer</code></b> an <code>School</code></td>
+      <td>Pflegung in <code>Admin → Schulen</code>. Wird im DMS-Mapping als verfügbares Feld angeboten.</td>
+    </tr>
+    <tr>
+      <td><b>Bulk-Export = eine PDF</b> mit QR-Trennseiten</td>
+      <td>Streaming-Endpoint. DMS splittet anhand QR-Pages automatisch.</td>
+    </tr>
+    <tr class="new-row" style="background:#fbf6ff">
+      <td><b><span class="tag new">NEU</span> Konfigurierbares DMS-Feldmapping</b></td>
+      <td>Admin definiert pro Mandant, welche Buchungsfelder unter welchem Schlüssel im QR ankommen. Siehe <a href="#s5">§5</a>.</td>
+    </tr>
+    <tr class="new-row" style="background:#fbf6ff">
+      <td><b><span class="tag new">NEU</span> Hinweis bei Buchungen ohne Beleg</b></td>
+      <td>Nicht-blockierender Hinweis in Dashboard-Tabelle und Buchungs-Modal (rotes 📎-Icon mit Tooltip). Kein Zwang.</td>
+    </tr>
+    <tr><td><b>USER darf rückwirkend Belege hochladen</b></td><td>solange Buchung nicht <code>isFinalized</code>.</td></tr>
+    <tr><td><b>USER darf eigene Uploads löschen</b></td><td>solange Buchung nicht <code>isFinalized</code>; danach nur Admin (Soft-Delete).</td></tr>
+    <tr><td><b>HEIC-Support</b></td><td><span class="tag">verschoben</span> — nicht jetzt nötig.</td></tr>
+    <tr><td><b>Clientseitige QR-Erkennung beim Upload</b></td><td><span class="tag">verschoben</span> — nicht Phase 1.</td></tr>
+  </table>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s2"><span class="num">2</span>Datenfluss</h2>
+<div class="card">
+<pre>
+ ┌────────────┐  Upload + Belegart    ┌────────────────┐
+ │ Buchungs-  │ ────────────────────▶ │ POST /bookings │
+ │  Modal     │ ◀──────────────────── │  /:id/receipts │
+ └────────────┘   Metadaten           └──────┬─────────┘
+                                              │ Magic-Byte + SHA-256
+                                              ▼
+                                      ┌─────────────────┐
+                                      │ Docker Volume   │
+                                      │ uploads/schoolId│
+                                      │     /YYYY-MM/   │
+                                      └─────────────────┘
+
+ ┌─────────────────────────┐
+ │ Admin → DMS-Mapping     │  ┌──────────────────────┐
+ │ (Mandant-Konfiguration) │─▶│ DmsFieldMapping (DB) │◀── liest:
+ │ Booking-Feld → DMS-Key  │  └──────────────────────┘    QR-Builder
+ └─────────────────────────┘
+
+ ┌────────────────────────────┐
+ │ Admin: Sammel-Export       │  GET /bookings/dms-export
+ │ (Zeitraum, Schule, ...)    │ ────────────────────────────┐
+ └────────────────────────────┘                             ▼
+                              ┌──────────────────────────────────────┐
+                              │ pdf-lib Pipeline                     │
+                              │  je Beleg: Trennseite + QR + Datei   │
+                              │  QR-Payload aus DmsFieldMapping      │
+                              └─────────────────────┬────────────────┘
+                                                    ▼
+                                  eine PDF (Streaming) ─▶ DMS splittet via QR
+</pre>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s3"><span class="num">3</span>Datenmodell (Prisma)</h2>
+
+<h3>3.1 Neue Modelle</h3>
+<pre>
+<span class="k">model</span> Belegart {
+  id        String   @id @default(uuid())
+  schoolId  String   @map(<span class="s">"school_id"</span>)
+  code      String   <span class="c">// UPPER_SNAKE, z.B. "QUITTUNG"</span>
+  label     String   <span class="c">// Anzeige: "Quittung"</span>
+  sortOrder Int      @default(0) @map(<span class="s">"sort_order"</span>)
+  isActive  Boolean  @default(<span class="n">true</span>) @map(<span class="s">"is_active"</span>)
+  createdAt DateTime @default(now()) @map(<span class="s">"created_at"</span>)
+
+  school    School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  receipts  BookingReceipt[]
+
+  @@unique([schoolId, code])
+  @@map(<span class="s">"belegarten"</span>)
+}
+
+<span class="k">model</span> BookingReceipt {
+  id           String   @id @default(uuid())
+  bookingId    String   @map(<span class="s">"booking_id"</span>)
+  belegartId   String?  @map(<span class="s">"belegart_id"</span>)
+  originalName String   @map(<span class="s">"original_name"</span>)
+  mimeType     String   @map(<span class="s">"mime_type"</span>)
+  sizeBytes    Int      @map(<span class="s">"size_bytes"</span>)
+  storagePath  String   @map(<span class="s">"storage_path"</span>)
+  sha256       String
+  pageCount    Int?     @map(<span class="s">"page_count"</span>)
+  uploadedById String   @map(<span class="s">"uploaded_by_id"</span>)
+  uploadedAt   DateTime @default(now()) @map(<span class="s">"uploaded_at"</span>)
+  deletedAt    DateTime? @map(<span class="s">"deleted_at"</span>)
+
+  booking    Booking   @relation(fields: [bookingId], references: [id])
+  belegart   Belegart? @relation(fields: [belegartId], references: [id])
+  uploadedBy User      @relation(fields: [uploadedById], references: [id])
+
+  @@index([bookingId])
+  @@index([sha256])
+  @@map(<span class="s">"booking_receipts"</span>)
+}
+
+<span class="c">// ⭐ NEU in v2: Konfigurierbares Mapping pro Mandant</span>
+<span class="k">model</span> DmsFieldMapping {
+  id          String        @id @default(uuid())
+  schoolId    String        @map(<span class="s">"school_id"</span>)
+  source      FieldSource   <span class="c">// BOOKING_FIELD | CONSTANT</span>
+  bookingField BookingField? <span class="c">// gesetzt wenn source = BOOKING_FIELD</span>
+  constantValue String?      @map(<span class="s">"constant_value"</span>) <span class="c">// gesetzt wenn source = CONSTANT (z.B. "1" für Fibu)</span>
+  dmsKey      String        <span class="c">// frei wählbar, z.B. "sichtid1"</span>
+  format      FieldFormat?  <span class="c">// nur sinnvoll bei BOOKING_FIELD</span>
+  maxLength   Int?          @map(<span class="s">"max_length"</span>) <span class="c">// Auto-Truncate (zeichenweise) — nur bei Text-Feldern sinnvoll</span>
+  sortOrder   Int           @default(0) @map(<span class="s">"sort_order"</span>)
+  isActive    Boolean       @default(<span class="n">true</span>) @map(<span class="s">"is_active"</span>)
+  includeOnSeparator Boolean @default(<span class="n">true</span>) @map(<span class="s">"include_on_separator"</span>)
+
+  school      School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, dmsKey])
+  @@map(<span class="s">"dms_field_mappings"</span>)
+  <span class="c">// CHECK: (source=BOOKING_FIELD AND bookingField IS NOT NULL)</span>
+  <span class="c">//     OR (source=CONSTANT       AND constantValue IS NOT NULL)</span>
+}
+
+<span class="k">enum</span> FieldSource {
+  BOOKING_FIELD   <span class="c">// Wert wird live aus der Buchung gezogen</span>
+  CONSTANT        <span class="c">// fester Wert, z.B. "1" für DMS-Sicht "Fibu"</span>
+}
+
+<span class="k">enum</span> BookingField {
+  BOOKING_DATE        <span class="c">// Buchung.bookingDate</span>
+  RECEIPT_NUMBER      <span class="c">// Buchung.receiptNumber (mit Jahr-Präfix)</span>
+  AMOUNT              <span class="c">// Buchung.amount</span>
+  DEBIT_CREDIT        <span class="c">// "S" / "H"</span>
+  ACCOUNT_NUMBER      <span class="c">// Account.accountNumber</span>
+  ACCOUNT_NAME
+  COUNTER_ACCOUNT_NUMBER
+  COUNTER_ACCOUNT_NAME
+  COST_CENTER_CODE
+  COST_CENTER_NAME
+  DESCRIPTION
+  TAX_KEY
+  BELEGART_CODE
+  BELEGART_LABEL
+  SCHOOL_NAME
+  SCHOOL_CODE
+  DMS_MANDANTEN_NR    <span class="c">// School.dmsMandantenNummer</span>
+  DATEV_MANDANTEN_NR  <span class="c">// aus DatevExportConfig</span>
+  CREATED_BY          <span class="c">// User.displayName</span>
+  FILE_INDEX          <span class="c">// "1/3" — laufender Beleg</span>
+}
+
+<span class="k">enum</span> FieldFormat {
+  RAW                 <span class="c">// 1:1 als String</span>
+  DATE_DDMMYYYY       <span class="c">// 19.05.2026</span>
+  DATE_ISO            <span class="c">// 2026-05-19</span>
+  DATE_YYYYMMDD       <span class="c">// 20260519</span>
+  NUMBER_DE           <span class="c">// 42,80</span>
+  NUMBER_DE_CURRENCY  <span class="c">// 42,80 EUR</span>
+  NUMBER_DOT          <span class="c">// 42.80</span>
+  UPPER
+  LOWER
+}
+</pre>
+
+<h3>3.2 Erweiterung bestehender Modelle</h3>
+<table>
+  <tr><th>Modell</th><th>Neues Feld</th><th>Zweck</th></tr>
+  <tr><td><code>School</code></td><td><code>dmsMandantenNummer String?</code></td><td>Wandert in QR (über Mapping <code>DMS_MANDANTEN_NR</code>)</td></tr>
+  <tr><td><code>School</code></td><td><code>belegartDefaultId String?</code></td><td>Standard-Belegart-Vorgabe im Modal</td></tr>
+  <tr><td><code>School</code></td><td><code>belegartRequired Boolean @default(false)</code></td><td><b>Pro Schule schaltbar</b> in <em>Admin → Schulen</em>. Wenn an: Buchung kann ohne Belegart nicht gespeichert werden.</td></tr>
+</table>
+
+<!-- ====================================================================== -->
+<h2 id="s4"><span class="num">4</span>Backend-Endpoints</h2>
+
+<table>
+  <tr><th>Methode</th><th>Route</th><th>Rolle</th><th>Zweck</th></tr>
+  <tr><td><span class="tag api">POST</span></td><td class="mono">/bookings/:id/receipts</td><td>USER</td><td>Multipart-Upload (1–10 Dateien, ≤10 MB/Datei)</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/bookings/:id/receipts</td><td>USER</td><td>Metadaten-Liste</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/bookings/receipts/:rid/download</td><td>USER+ADMIN</td><td>Stream der Originaldatei</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/bookings/receipts/:rid/preview</td><td>USER+ADMIN</td><td>Inline-Vorschau (PDF/Image)</td></tr>
+  <tr><td><span class="tag api">DELETE</span></td><td class="mono">/bookings/receipts/:rid</td><td>USER&dagger; / ADMIN</td><td>Soft-Delete (&dagger;: vor <code>isFinalized</code>)</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/belegarten?schoolId=…</td><td>USER</td><td>aktive Belegarten</td></tr>
+  <tr><td><span class="tag api">POST/PUT/DELETE</span></td><td class="mono">/admin/schools/:id/belegarten</td><td>ADMIN</td><td>CRUD Belegarten</td></tr>
+  <tr style="background:#fbf6ff"><td><span class="tag api">GET</span></td><td class="mono">/admin/schools/:id/dms-mapping</td><td>ADMIN</td><td><span class="tag new">NEU</span> Mapping abrufen</td></tr>
+  <tr style="background:#fbf6ff"><td><span class="tag api">PUT</span></td><td class="mono">/admin/schools/:id/dms-mapping</td><td>ADMIN</td><td><span class="tag new">NEU</span> Mapping speichern (Array von Zeilen)</td></tr>
+  <tr style="background:#fbf6ff"><td><span class="tag api">POST</span></td><td class="mono">/admin/schools/:id/dms-mapping/preview</td><td>ADMIN</td><td><span class="tag new">NEU</span> Live-Vorschau QR-Payload mit Beispiel-Buchung</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/bookings/dms-export</td><td>ADMIN</td><td>Sammel-PDF (Streaming)</td></tr>
+  <tr><td><span class="tag api">GET</span></td><td class="mono">/bookings/dms-export/preview</td><td>ADMIN</td><td>Zähler vor Generierung (Buchungen, Belege, Seiten, MB)</td></tr>
+</table>
+
+<!-- ====================================================================== -->
+<h2 id="s5" class="new"><span class="num">5</span>DMS-Feldmapping <span style="color:var(--new)">⭐ neu in v2</span></h2>
+
+<div class="callout new">
+  <b>Das Herzstück deiner Anforderung.</b> Du legst pro Mandant fest, welche Buchungsfelder unter welchem
+  Namen ins DMS wandern — sowohl im QR-Code als auch sichtbar auf der Trennseite. Wenn dein DMS später
+  „<code>Belegdatum</code>" statt „<code>DAT</code>" erwartet, änderst du <em>einen</em> Wert in der Admin-Maske,
+  ohne Codeänderung.
+</div>
+
+<h3>5.1 Admin-Maske <em>Schulen → DMS-Feldmapping</em></h3>
+<div class="card">
+<pre>
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│ DMS-Feldmapping · FES Minden                                              [+ Feld hinzu] │
+├──────┬──────────────┬───────────────────────┬──────────────────┬────────────┬──────┬─────┤
+│ Sort │ Quelle       │ Buchungsfeld / Wert   │ DMS-Schlüssel    │ Format     │ Max  │aktiv│
+├──────┼──────────────┼───────────────────────┼──────────────────┼────────────┼──────┼─────┤
+│ ⠿ 10 │ Buchungsfeld │ DMS_MANDANTEN_NR      │ mandant          │ RAW        │  —   │ ✓ 🗑│
+│ ⠿ 20 │ Buchungsfeld │ BELEGART_CODE         │ dokumentart      │ RAW        │  —   │ ✓ 🗑│
+│ ⠿ 30 │ Buchungsfeld │ BOOKING_DATE          │ datumindokument1 │ DATE_DD…   │  —   │ ✓ 🗑│
+│ ⠿ 40 │ Buchungsfeld │ AMOUNT                │ betagsumme       │ NUMBER_DE  │  —   │ ✓ 🗑│
+│ ⠿ 50 │ Buchungsfeld │ COST_CENTER_CODE      │ projektnr1       │ RAW        │  —   │ ✓ 🗑│
+│ ⠿ 60 │ KONSTANTE    │ "1"     (= Fibu)      │ sichtid1         │  —         │  —   │ ✓ 🗑│
+│ ⠿ 70 │ Buchungsfeld │ DESCRIPTION           │ textindokument   │ RAW        │  60  │ ✓ 🗑│
+│ ⠿ 80 │ Buchungsfeld │ ACCOUNT_NUMBER        │ Kontonr1         │ RAW        │  —   │ ✓ 🗑│
+│ ⠿ 90 │ Buchungsfeld │ RECEIPT_NUMBER        │ belegnr          │ RAW        │  —   │ ✓ 🗑│
+└──────┴──────────────┴───────────────────────┴──────────────────┴────────────┴──────┴─────┘
+
+[ Vorschau anzeigen ]   ← rendert QR-Payload mit der ältesten Buchung der Schule
+</pre>
+</div>
+
+<h3>5.2 Verhalten</h3>
+<ul>
+  <li><b>Drag-Sort</b> bestimmt die Reihenfolge der Keys im QR-Payload.</li>
+  <li><b>DMS-Schlüssel</b> ist pro Schule eindeutig. Validierung: keine Pipe <code>|</code>, kein Doppelpunkt
+      <code>:</code>, max. 40 Zeichen.</li>
+  <li><b>Format</b> nur dort sichtbar, wo es Sinn ergibt (Datum → Datums-Formate, Betrag → Zahlenformate, …).</li>
+  <li><b>„aktiv"</b> AUS = Feld bleibt in der Konfiguration, wird aber nicht in den QR geschrieben (z.B. <code>Verwendungszweck</code>
+      ist datenschutz-empfindlich, drum ausgeschaltet).</li>
+  <li><b>Vorschau-Button</b> ruft <code>POST /dms-mapping/preview</code> auf und zeigt:
+      <ol style="margin-top:4px">
+        <li>die generierte Unstructured-Data-Zeile</li>
+        <li>den daraus erzeugten QR (Bild)</li>
+        <li>einen Längenwarner (s.u.)</li>
+      </ol>
+  </li>
+</ul>
+
+<h3>5.3 Längen-Constraint &amp; Auto-Trunkierung</h3>
+<div class="callout warn">
+  Die Swiss-QR-Unstructured-Data-Zeile darf <b>max. 140 Zeichen</b> sein. Mit 9 Mapping-Zeilen ist das schnell
+  erreicht, vor allem wegen freier Texte wie <code>textindokument</code>.
+</div>
+
+<h4 style="margin-bottom:6px">Mehrstufige Strategie (Builder, deterministisch &amp; O(n))</h4>
+<ol>
+  <li><b>Sanitize</b> jeder Wert: <code>|</code> und <code>:</code> → Leerzeichen,
+      Zeilenumbruch/Tab → Leerzeichen, doppelte Leerzeichen kollabieren, beidseitig trimmen.
+      <em>(Sonst zerschießt der Wert das Key-Value-Format.)</em></li>
+  <li><b>Field-Truncate</b>: wenn <code>maxLength</code> gesetzt und Wert länger → auf <code>maxLength − 1</code>
+      kürzen, „<code>…</code>" anhängen. <b>Code-Point-sicher</b> (Array.from + slice + join), damit
+      Umlaute/Mehrbyte-Zeichen nicht in der Mitte abgeschnitten werden.</li>
+  <li><b>Zeile zusammenbauen</b>, mit <code>|</code> joinen.</li>
+  <li><b>Hard-Cap-Check</b>: wenn Zeile &gt; 140 Zeichen → <code>ExportError</code> mit klarer Meldung
+      <em>„QR-Payload überschreitet 140 Zeichen (gemessen: 152). Bitte ein Feld deaktivieren oder maxLength
+      eines Textfelds verringern."</em> Kein stilles Abschneiden.</li>
+</ol>
+
+<h4 style="margin:14px 0 6px">Pre-Flight-Check beim Bulk-Export</h4>
+<p>
+  Vor dem Generieren der Mappe iteriert der Server <b>einmal</b> über alle gefilterten Buchungen und prüft die
+  längste Payload — das ist ein billiger Query (<code>MAX(length(description))</code>) + ein
+  In-Memory-Build-Lauf. Bei Overflow: Export bricht <em>vor</em> dem ersten erzeugten Byte ab und zeigt dem
+  Admin, welche konkrete Buchung das Problem ist. <span class="tag ok">kein verschwendetes PDF</span>
+</p>
+
+<h4 style="margin:14px 0 6px">Performance-Garantien</h4>
+<table>
+  <tr><th>Operation</th><th>Komplexität</th><th>Bemerkung</th></tr>
+  <tr><td>Mapping laden</td><td>1× pro Schule, gecacht (LRU 10 min)</td><td>Buchungen einer Schule teilen sich die Konfig — kein N+1.</td></tr>
+  <tr><td>Sanitize</td><td>O(L) — L = Wertlänge</td><td>Eine einzelne <code>.replace(/[|:\s]+/g, ' ').trim()</code>-Kette, kein Regex-Backtracking.</td></tr>
+  <tr><td>Truncate</td><td>O(maxLength)</td><td><code>Array.from(str).slice(0, maxLength-1)</code> — nur bei Bedarf.</td></tr>
+  <tr><td>Hard-Cap-Check</td><td>O(1)</td><td>Reines <code>length</code>-Property.</td></tr>
+</table>
+<p>→ Für 5.000 Buchungen im Bulk: &lt; 50 ms reine Builder-Zeit, dominiert vom DB-Read und PDF-Encoding.</p>
+
+<div class="callout">
+  <b>Im Mapping-Editor:</b> Live-Zähler zeigt die aktuelle Payload-Länge unter der Tabelle. Ab 120 Zeichen
+  gelb, ab 140 rot mit „Speichern blockiert". Der „Vorschau"-Button rendert die echte Builder-Ausgabe inklusive
+  Sanitize/Truncate.
+</div>
+
+<div class="callout warn">
+  <b>Realitätscheck Default-Seed:</b> die fixen Keys (<code>mandant, dokumentart, datumindokument1, …, belegnr</code>)
+  verbrauchen mit den 8 Pipes und Doppelpunkten <b>~110 Zeichen reine Struktur</b>. Es bleiben also <b>~30 Zeichen</b>
+  für alle Werte zusammen. Bei einer typischen Buchung (Datum + Belegart + Konto + Betrag + Belegnr) ist das
+  bereits eng — <code>textindokument</code> wird de facto auf <b>~10 Zeichen Restbudget</b> truncated.
+  Empfehlung für den Praxisbetrieb: <code>textindokument</code> entweder auf <b>maxLength 20</b> setzen <em>oder</em>
+  per Default deaktivieren (Beschreibung steht ja im Klartext auf der Trennseite). Im Seed lasse ich es bei 60 —
+  beim ersten Export-Fehler weiß der Admin, was zu tun ist.
+</div>
+
+<h3>5.4 Seed (verbindlich)</h3>
+<p>Beim Anlegen einer neuen Schule wird automatisch <b>genau dieses Default-Mapping</b> angelegt — kompatibel zu
+deinem DMS-Schema:</p>
+<table>
+  <tr><th>DMS-Feld</th><th>Quelle</th><th>Wert / Buchungsfeld</th><th>Format</th><th>Beispielwert</th></tr>
+  <tr><td class="mono">mandant</td><td>Buchungsfeld</td><td><code>DMS_MANDANTEN_NR</code></td><td>RAW</td><td>40</td></tr>
+  <tr><td class="mono">dokumentart</td><td>Buchungsfeld</td><td><code>BELEGART_CODE</code></td><td>RAW</td><td>QUITTUNG</td></tr>
+  <tr><td class="mono">datumindokument1</td><td>Buchungsfeld</td><td><code>BOOKING_DATE</code></td><td>DATE_DDMMYYYY</td><td>19.05.2026</td></tr>
+  <tr><td class="mono">betagsumme</td><td>Buchungsfeld</td><td><code>AMOUNT</code></td><td>NUMBER_DE</td><td>42,80</td></tr>
+  <tr><td class="mono">projektnr1</td><td>Buchungsfeld</td><td><code>COST_CENTER_CODE</code></td><td>RAW</td><td>11020</td></tr>
+  <tr style="background:#fbf6ff"><td class="mono">sichtid1</td><td><b>KONSTANTE</b></td><td><code>"1"</code> <span class="tag ok">= Fibu</span></td><td>—</td><td>1</td></tr>
+  <tr><td class="mono">textindokument</td><td>Buchungsfeld</td><td><code>DESCRIPTION</code></td><td>RAW · <b>maxLength 60</b></td><td>Büromaterial Müller GmbH</td></tr>
+  <tr><td class="mono">Kontonr1</td><td>Buchungsfeld</td><td><code>ACCOUNT_NUMBER</code></td><td>RAW</td><td>1200</td></tr>
+  <tr><td class="mono">belegnr</td><td>Buchungsfeld</td><td><code>RECEIPT_NUMBER</code></td><td>RAW</td><td>2026-00123</td></tr>
+</table>
+<div class="callout ok">
+  <b><code>sichtid1</code> = feste „1"</b> entspricht im DMS der Sicht <em>Fibu</em>. Der Wert ist im Mapping als
+  <code>source = CONSTANT</code>, <code>constantValue = "1"</code> hinterlegt — bei einem späteren DMS-Umzug
+  ändert der Admin nur diesen Wert, kein Code-Eingriff.
+</div>
+<div class="callout">
+  <b>Hinweis:</b> Im Default-Seed sind <em>Gegenkonto</em> und ein Datei-Index (<em>Seite 1/2</em>) bewusst <b>nicht</b>
+  enthalten — falls du sie später brauchst, sind sie im Mapping-Editor mit einem Klick hinzufügbar
+  (<code>COUNTER_ACCOUNT_NUMBER</code>, <code>FILE_INDEX</code>).
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s6"><span class="num">6</span>Swiss-QR-Payload (dynamisch)</h2>
+
+<div class="callout ok">
+  <b>SPC-Header bleibt identisch zur Referenz</b> — die unstrukturierte Daten-Zeile wird aus dem Mapping
+  generiert. Damit kann die bestehende n8n-DMS-Pipeline ohne Anpassung weiterlaufen, sobald sie auf die
+  konfigurierten Keys angepasst ist.
+</div>
+
+<h3>6.1 Generierungs-Logik (Pseudocode)</h3>
+<pre>
+<span class="c">// Verbotene Steuerzeichen für unser KEY:value|… Format</span>
+<span class="k">const</span> SANITIZE = /[|:\r\n\t]+/g;
+<span class="k">const</span> COLLAPSE_WS = /\s{2,}/g;
+
+<span class="k">function</span> sanitize(s) {
+  <span class="k">return</span> String(s ?? <span class="s">''</span>).replace(SANITIZE, <span class="s">' '</span>).replace(COLLAPSE_WS, <span class="s">' '</span>).trim();
+}
+
+<span class="k">function</span> truncate(s, maxLength) {                       <span class="c">// code-point-sicher</span>
+  <span class="k">if</span> (!maxLength) <span class="k">return</span> s;
+  <span class="k">const</span> chars = Array.from(s);                          <span class="c">// teilt nach Unicode-CP</span>
+  <span class="k">if</span> (chars.length &lt;= maxLength) <span class="k">return</span> s;
+  <span class="k">return</span> chars.slice(0, maxLength - 1).join(<span class="s">''</span>) + <span class="s">'…'</span>;
+}
+
+<span class="k">async function</span> buildQrPayload(booking, fileIndex, totalFiles) {
+  <span class="k">const</span> mapping = <span class="k">await</span> getMappingCached(booking.schoolId); <span class="c">// LRU, 10 min</span>
+
+  <span class="k">const</span> kv = mapping.map(m => {
+    <span class="k">const</span> raw = m.source === <span class="s">'CONSTANT'</span>
+      ? m.constantValue
+      : resolveField(booking, m.bookingField, fileIndex, totalFiles);
+    <span class="k">const</span> formatted = m.format ? applyFormat(raw, m.format) : raw;
+    <span class="k">const</span> safe = sanitize(formatted);
+    <span class="k">const</span> capped = truncate(safe, m.maxLength);
+    <span class="k">return</span> `${m.dmsKey}:${capped}`;
+  });
+
+  <span class="k">const</span> unstructured = kv.join(<span class="s">'|'</span>);
+  <span class="k">if</span> (unstructured.length &gt; <span class="n">140</span>) {
+    <span class="k">throw new</span> ExportError(
+      `QR-Payload überschreitet 140 Zeichen (${unstructured.length}). ` +
+      `Buchung ${booking.id}: Feld deaktivieren oder maxLength reduzieren.`
+    );
+  }
+  <span class="k">return</span> assembleSpcLines(booking.school, booking.amount, unstructured);
+}
+</pre>
+
+<h3>6.2 Beispiel-Payload (Default-Mapping, Buchung 2026-00123 mit 2 Belegen, Beleg 1)</h3>
+<pre>
+SPC
+0200
+1
+
+K
+FES Minden
+
+
+
+CH
+
+
+
+
+42.80
+EUR
+
+
+
+
+NON
+
+mandant:40|dokumentart:QUITTUNG|datumindokument1:19.05.2026|betagsumme:42,80|projektnr1:11020|sichtid1:1|textindokument:Büromaterial Müller GmbH|Kontonr1:1200|belegnr:2026-00123
+EPD
+</pre>
+
+<!-- ====================================================================== -->
+<h2 id="s7"><span class="num">7</span>Trennseite (Layout)</h2>
+<div class="card">
+<pre>
+┌──────────────────────────────────────────────────────────────────────┐
+│ CREDO                                                KASSENBUCH BELEG │
+│ ───────────────────────────────────────────────────────────────────  │
+│                                                                       │
+│   mandant:           40                        ┌──────────────────┐  │
+│   dokumentart:       QUITTUNG                  │                  │  │
+│   datumindokument1:  19.05.2026                │   ▓▓▓▓▓▓▓▓▓▓▓▓   │  │
+│   betagsumme:        42,80                     │   ▓ Swiss QR  ▓   │  │
+│   projektnr1:        11020                     │   ▓▓▓▓▓▓▓▓▓▓▓▓   │  │
+│   sichtid1:          1  (Fibu)                 │                  │  │
+│   textindokument:    Büromaterial Müller GmbH  └──────────────────┘  │
+│   Kontonr1:          1200                             Swiss QR Code  │
+│   belegnr:           2026-00123                                       │
+│                                                                       │
+│   Datei:             quittung_mueller.pdf  (Beleg 1 von 2)            │
+│   Hochgeladen:       19.05.2026 14:32 · M. Mustermann                 │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+            ── danach: die Belegdatei selbst (eingebettet) ──
+</pre>
+</div>
+<p class="lead" style="font-size:14px">
+  Linke Spalte zeigt <b>alle</b> aktiven Mapping-Felder mit <code>includeOnSeparator=true</code> — in derselben
+  Reihenfolge und mit denselben DMS-Labels wie im QR. Beschreibung und „Datei/Hochgeladen" sind feste Zeilen
+  unabhängig vom Mapping.
+</p>
+
+<!-- ====================================================================== -->
+<h2 id="s8"><span class="num">8</span>Sammel-Export — Aufbau der PDF</h2>
+<pre>
+[ Seite  1 ] Cover    — „Kassenbuch-Belege FES Minden · 2026-Q1
+                          47 Buchungen · 63 Belege
+                          Aufschlüsselung pro Konto:
+                            1200 Kasse                +12.450,80 EUR  /  −3.207,00 EUR
+                            6815 Bürobedarf            −  528,40 EUR
+                            6800 Telefon               −  142,80 EUR
+                            ...
+                          Erstellt 19.05.2026 14:55 von ADMIN · SHA-256: ab12…ef"
+[ Seite  2 ] Trennseite QR ─┐
+[ Seite  3 ] Beleg 1.1      │  Buchung 2026-00001
+[ Seite  4 ] Trennseite QR ─┘  (Buchung hatte 2 Belege)
+[ Seite  5 ] Beleg 1.2 S.1
+[ Seite  6 ] Beleg 1.2 S.2
+[ Seite  7 ] Trennseite QR ─┐
+[ Seite  8 ] Beleg 2.1      │  Buchung 2026-00002
+...
+</pre>
+
+<p>Filter im Export-Dialog: <em>Zeitraum, Schule (Mehrfach), Belegart (Mehrfach), Buchungen-ohne-Beleg einbeziehen</em>.
+Default: <em>nicht</em> einbeziehen, weil sonst Geistereinträge im DMS entstehen.</p>
+
+<h3>8.1 Sortierung im Bulk-PDF <span class="tag ok">festgelegt</span></h3>
+<p>
+  <code>ORDER BY schoolId ASC, bookingDate ASC, receiptNumber ASC</code> — die Belege erscheinen also pro Schule
+  chronologisch und innerhalb desselben Tages in Belegnummer-Reihenfolge. Das DMS liest die Mappe dann in
+  derselben Reihenfolge ein, in der die Buchungen im Kassenbuch stehen.
+</p>
+
+<h3>8.2 Cover-Summen <span class="tag ok">festgelegt</span></h3>
+<p>
+  Aufschlüsselung der Beträge im Cover <b>pro Konto</b> (Soll- und Habenbeträge getrennt). Bei Multi-Mandant-Export
+  wird der Cover zusätzlich pro Schule gruppiert.
+</p>
+
+<!-- ====================================================================== -->
+<h2 id="s9"><span class="num">9</span>UI / UX</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Buchungs-Modal</h3>
+    <ul>
+      <li>Neues Dropdown <b>„Belegart"</b> (optional, Default aus Schule).</li>
+      <li>Drag-&amp;-Drop-Zone unter Buchungsdaten, Multi-File, Live-Vorschau.</li>
+      <li>Upload erst nach erfolgreichem Speichern der Buchung.</li>
+    </ul>
+  </div>
+  <div class="card highlight">
+    <h3>Dashboard-Tabelle · Kein-Beleg-Hinweis <span class="tag new">NEU</span></h3>
+    <ul>
+      <li>Spalte 📎 <b>Belege</b>: zeigt Anzahl als grünen Badge.</li>
+      <li><b>Bei 0 Belegen</b>: graues 📎 mit rotem Punkt + Tooltip
+          <em>„Diese Buchung hat keinen Beleg"</em>. <b>Nur Hinweis — keine Blockade.</b></li>
+      <li>Optional: Filter-Chip oben „⚠ Buchungen ohne Beleg anzeigen".</li>
+      <li>Klick auf 📎 → Popover mit Liste, Vorschau, Download, Löschen.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Admin → Schulen → Belegarten</h3>
+    <ul>
+      <li>Drag-Sort, Aktiv-Schalter, Default-Markierung.</li>
+      <li>Code <code>UPPER_SNAKE</code>, eindeutig pro Schule.</li>
+    </ul>
+  </div>
+  <div class="card highlight">
+    <h3>Admin → Schulen → DMS-Mapping <span class="tag new">NEU</span></h3>
+    <ul>
+      <li>Tabellen-Editor wie in §5.1 mit Live-Längen-Anzeige.</li>
+      <li>„QR-Vorschau"-Button rendert echtes QR mit Beispieldaten.</li>
+      <li>Reset-Button setzt auf Default-Mapping zurück.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Admin → DMS-Export</h3>
+    <ul>
+      <li>Eigener Menüpunkt neben „DATEV Export".</li>
+      <li>Filter + Vorschau-Zähler vor „Mappe generieren".</li>
+      <li>Bei &gt; 500 Buchungen Hinweis: „Async-Job wird gestartet, Download per Mail".</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Buchungs-Modal · Kein-Beleg-Hinweis <span class="tag new">NEU</span></h3>
+    <ul>
+      <li>Beim Speichern-Klick ohne hochgeladenen Beleg: nicht-blockierender Toast „Hinweis: Du hast keinen
+          Beleg angehängt. Du kannst das später nachholen." <b>Keine Bestätigung nötig.</b></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s10"><span class="num">10</span>Storage &amp; Sicherheit</h2>
+<table>
+  <tr><th>Punkt</th><th>Umsetzung</th></tr>
+  <tr><td>Speicherort</td><td>Docker-Volume <code>kassenbuch_uploads</code>, Pfadschema <code>schoolId/YYYY-MM/uuid.ext</code></td></tr>
+  <tr><td>Erlaubte Typen</td><td>PDF, JPEG, PNG. Magic-Byte via <code>file-type</code></td></tr>
+  <tr><td>Max. Größe</td><td>10 MB / Datei · 10 Dateien / Upload · konfigurierbar</td></tr>
+  <tr><td>Integrität</td><td>SHA-256, Duplikat-Warnung pro Buchung</td></tr>
+  <tr><td>Multi-Tenant-Scope</td><td>Jeder Endpoint vergleicht <code>schoolId</code> mit <code>req.user.schoolId</code> <span class="tag sec">CREDO-Pflicht</span></td></tr>
+  <tr><td>Audit-Log</td><td>Upload, Soft-Delete, Bulk-Export (mit Filter + PDF-Hash)</td></tr>
+  <tr><td>Rate-Limit</td><td>Upload 30/min/IP · Export 5/min/User</td></tr>
+  <tr><td>Verschlüsselung</td><td>HTTPS in-transit (Caddy) · FS-Encryption at-rest reicht (keine PII-Sonderfelder)</td></tr>
+</table>
+
+<!-- ====================================================================== -->
+<h2 id="s11"><span class="num">11</span>Compliance: GoBD &amp; DSGVO</h2>
+<div class="callout warn">
+  Kassenbücher fallen unter <b>GoBD</b>: Belege <b>10 Jahre</b>, <b>unveränderbar</b>, <b>maschinell auswertbar</b>,
+  mit <b>Audit-Trail</b>.
+</div>
+<ul>
+  <li>Re-Upload erzeugt neuen Record; alter bleibt mit <code>deletedAt</code>.</li>
+  <li>Audit-Trail in <code>AuditLog</code> mit User, IP, Zeit, vorher/nachher.</li>
+  <li><b>Kein</b> automatischer Hard-Delete-Job. Bei Bedarf manuell nach 10 Jahren.</li>
+  <li>Bulk-Export erzeugt Audit-Eintrag mit Filter-Parametern + PDF-SHA-256 (Reproduzierbarkeit).</li>
+  <li>DSGVO: Recht-auf-Löschung steht <em>nicht</em> über Aufbewahrungspflicht.</li>
+</ul>
+
+<!-- ====================================================================== -->
+<h2 id="s12"><span class="num">12</span>Was du ggf. vergessen hast</h2>
+<div class="card">
+<ol>
+  <li><b>Belege bei Storno.</b> Storno erbt Referenz auf Belege des Originals — kein Re-Upload; im Bulk einmal mit Hinweis „Storno zu 2026-00123".</li>
+  <li><b>Belege bei Split-Buchungen.</b> An Master-Zeile der Split-Gruppe hängen, im UI bei allen Mitgliedern anzeigen.</li>
+  <li><b>Performance.</b> Streaming-Response, Async-Job ab ~500 Buchungen, PDF-Komprimierung.</li>
+  <li><b>Inline-Vorschau</b> statt Download beim Sichten — schneller im Alltag.</li>
+  <li><b>Doppel-Upload-Erkennung</b> via SHA-256.</li>
+  <li><b>Reihenfolge der Belege</b> per Drag-Reorder im Popover.</li>
+  <li><b>Klartext-Fallback auf der Trennseite</b> falls QR-OCR im DMS versagt (bereits im Layout §7).</li>
+  <li><b>Cover-Seite</b> mit Inhaltsverzeichnis, Summen, PDF-Hash.</li>
+  <li><b>Backup-Strategie für das Volume</b> ergänzen (Postgres-Backup deckt das nicht ab).</li>
+  <li><b>Dashboard-Spaltenreihenfolge:</b> 📎-Spalte in <code>COLUMN_DEFS</code> + Default-Order ergänzen, sonst sieht sie keiner.</li>
+  <li><b>Mapping-Vorschau-Längencheck:</b> bei langen Beschreibungen kann der QR über 140 Zeichen kommen — Hard-Block bauen.</li>
+  <li><b>Mandant-Switch im Admin-Bulk-Export:</b> Wenn mehrere Schulen ausgewählt sind und jede ihr eigenes Mapping hat — Mapping muss <em>pro Buchung</em> nach <code>booking.schoolId</code> gezogen werden, nicht global.</li>
+  <li><b>Sortierung im Bulk:</b> Standardmäßig nach <code>schoolId, bookingDate, receiptNumber</code> — damit das DMS nach Mandant gruppiert eingelesen werden kann.</li>
+</ol>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s13"><span class="num">13</span>Implementierungs-Phasen</h2>
+
+<div class="phase">
+  <span class="badge">Phase 1</span>
+  <div>
+    <h4>Fundament: Upload &amp; Download + Kein-Beleg-Hinweis</h4>
+    <small>≈ 2 PT</small>
+    <ul>
+      <li>Prisma-Migration: <code>Belegart</code>, <code>BookingReceipt</code>, neue School-Felder.</li>
+      <li>Backend-Routes Upload/List/Download/Preview/Delete + Multi-Tenant-Scope.</li>
+      <li>Frontend: Drag-Drop im Modal, 📎-Spalte, Popover, Kein-Beleg-Hinweis (Badge + Toast).</li>
+      <li>Admin-Maske „Belegarten pro Schule" mit Seed.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="phase">
+  <span class="badge">Phase 2</span>
+  <div>
+    <h4>DMS-Feldmapping (Kern der v2-Anforderung)</h4>
+    <small>≈ 1,5 PT</small>
+    <ul>
+      <li>Prisma-Migration <code>DmsFieldMapping</code> + Default-Seed pro Schule.</li>
+      <li>Backend: Resolver <code>resolveField()</code>, Formatter <code>applyFormat()</code>, Mapping-CRUD.</li>
+      <li>Admin-UI „DMS-Mapping" inkl. Live-QR-Vorschau und Längen-Warner.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="phase">
+  <span class="badge">Phase 3</span>
+  <div>
+    <h4>Sammel-Export: QR-Trennseiten &amp; Bulk-PDF</h4>
+    <small>≈ 2–3 PT</small>
+    <ul>
+      <li><code>qrcode</code> + <code>pdf-lib</code> + Trennseiten-Renderer (nutzt Mapping aus Phase 2).</li>
+      <li><code>GET /bookings/dms-export</code> mit Streaming + Vorschau-Endpoint.</li>
+      <li>Admin-UI „DMS Export".</li>
+      <li>Audit-Log-Eintrag mit Filter + PDF-Hash.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="phase">
+  <span class="badge">Phase 4</span>
+  <div>
+    <h4>Härtung &amp; Komfort</h4>
+    <small>≈ 1 PT</small>
+    <ul>
+      <li>Inline-Vorschau (iframe/img), Drag-Reorder.</li>
+      <li>Async-Job für große Zeiträume (&gt; 500 Buchungen, Download per Mail).</li>
+      <li>Backup-Doku für Volume.</li>
+      <li>Optional später: HEIC-Konvertierung, ClamAV, QR-Lesen beim Upload.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 id="s14"><span class="num">14</span>Offene Fragen</h2>
+<div class="card">
+<ol>
+  <li><b>Brauchst du <code>Gegenkonto</code> im DMS?</b> Im Default-Seed nicht enthalten, aber nachrüstbar.
+      (Manche DMS erwarten ein <code>Kontonr2</code>-Pendant.)</li>
+  <li><b>Soll der Datei-Index</b> (Beleg 1 von 2) als eigenes DMS-Feld in den QR? Wenn ja: unter welchem Schlüssel?
+      Im Seed aktuell aus, weil deine Liste das nicht enthält.</li>
+  <li><b>Format <code>betagsumme</code></b> — <code>NUMBER_DE</code> (42,80) oder erwartet das DMS Punkt-Dezimal
+      <code>NUMBER_DOT</code> (42.80) oder Cent-Integer (4280)?</li>
+  <li><b>Format <code>belegnr</code></b> — aktuell <code>"2026-00123"</code> (Jahr-Bindestrich-Nummer, 5-stellig
+      gepaddet). Will dein DMS lieber rein numerisch (<code>123</code>) oder mit anderem Trenner?</li>
+</ol>
+</div>
+
+<h2 style="margin-top:24px"><span class="num" style="background:var(--ok)">✓</span>Geklärt &amp; eingearbeitet</h2>
+<table>
+  <tr><th>Punkt</th><th>Antwort</th><th>Wo im Plan</th></tr>
+  <tr><td>DMS-Feldnamen für Seed</td><td>mandant, dokumentart, datumindokument1, betagsumme, projektnr1, sichtid1, textindokument, Kontonr1</td><td>§5.1 + §5.4</td></tr>
+  <tr><td>Sortierung im Bulk-PDF</td><td>Datum + Belegnummer (pro Schule)</td><td>§8.1</td></tr>
+  <tr><td>Cover-Aufschlüsselung</td><td>pro Konto</td><td>§8 + §8.2</td></tr>
+  <tr><td>Pflicht-Belegart</td><td>pro Schule schaltbar via <code>School.belegartRequired</code></td><td>§3.2</td></tr>
+  <tr><td><code>sichtid1</code></td><td>Konstante <code>"1"</code> (= Fibu im DMS)</td><td>§5.1 + §5.4</td></tr>
+  <tr><td><code>belegnr</code></td><td>Buchungsfeld <code>RECEIPT_NUMBER</code> als 9. Mapping-Zeile</td><td>§5.1 + §5.4</td></tr>
+  <tr><td><code>textindokument</code>-Trunkierung</td><td>Auto auf 60 Zeichen, code-point-sicher, mit „…"-Suffix · Hard-Cap 140 Zeichen für Gesamtzeile · Pre-Flight-Check beim Bulk-Export</td><td>§5.3 + §6.1</td></tr>
+</table>
+
+<footer>
+  v2 · 2026-05-19 · Wenn Phase 1 startet, parallel <code>/klaeren</code> für offene Detailpunkte.
+</footer>
+
+</div>
+</body>
+</html>

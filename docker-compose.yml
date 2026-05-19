@@ -37,6 +37,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
       PORT: 3000
+      UPLOAD_DIR: /data/uploads
+      MAX_RECEIPT_SIZE_MB: 10
+      MAX_RECEIPT_FILES_PER_UPLOAD: 10
+    volumes:
+      - uploads:/data/uploads
     networks:
       - internal
 
@@ -53,6 +58,8 @@ services:
 volumes:
   pgdata:
     name: kb_${MANDANT}_pgdata
+  uploads:
+    name: kb_${MANDANT}_uploads
 
 networks:
   reverse_proxy:

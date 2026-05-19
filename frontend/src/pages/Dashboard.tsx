@@ -12,6 +12,8 @@ import {
   ColumnId, COLUMN_DEFS, DEFAULT_COLUMN_ORDER, validateColumnOrder,
   renderCell, renderCellStyle, SortableTh, Booking,
 } from './dashboard-columns';
+import { ReceiptUpload } from '../components/ReceiptUpload';
+import { ReceiptPopover, BelegartDto, ReceiptDto } from '../components/ReceiptPopover';
 
 interface Account {
   id: string;
@@ -42,6 +44,8 @@ interface School {
   anfangsbestandAccountId: string | null;
   kassendifferenzAccountId: string | null;
   defaultBookingDateMode: 'TODAY' | 'EMPTY';
+  belegartDefaultId: string | null;
+  belegartRequired: boolean;
 }
 
 interface DailyStatus {
@@ -101,6 +105,10 @@ export function Dashboard() {
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [showPdfExport, setShowPdfExport] = useState(false);
   const [showAnfangsbestand, setShowAnfangsbestand] = useState(false);
+  const [receiptCounts, setReceiptCounts] = useState<Record<string, number>>({});
+  const [belegarten, setBelegarten] = useState<BelegartDto[]>([]);
+  const [receiptsForBooking, setReceiptsForBooking] = useState<Booking | null>(null);
+  const [toast, setToast] = useState<string>('');
 
   // Get the selected school object for configured account IDs
   const selectedSchoolObj = schools.find((s) => s.id === selectedSchool);
@@ -149,7 +157,15 @@ export function Dashboard() {
     if (!selectedSchool) return;
     const schoolParam = user?.role === 'ADMIN' ? `?schoolId=${selectedSchool}` : '';
     api.get<Account[]>(`/accounts${schoolParam}`).then(setAccounts);
+    api.get<BelegartDto[]>(`/belegarten${schoolParam}`).then(setBelegarten).catch(() => setBelegarten([]));
   }, [selectedSchool, user]);
+
+  const refreshReceiptCounts = useCallback((bookingIds: string[]) => {
+    if (bookingIds.length === 0) { setReceiptCounts({}); return; }
+    api.post<Record<string, number>>('/receipts/counts', { bookingIds })
+      .then(setReceiptCounts)
+      .catch(() => {});
+  }, []);
 
   const loadBookings = useCallback(() => {
     if (!selectedSchool) return;
@@ -160,9 +176,10 @@ export function Dashboard() {
         if (d.total === 0) {
           setShowAnfangsbestand(true);
         }
+        refreshReceiptCounts(d.bookings.map(b => b.id));
       })
       .catch((e) => setError(e.message));
-  }, [selectedSchool, page, user]);
+  }, [selectedSchool, page, user, refreshReceiptCounts]);
 
   useEffect(() => { loadBookings(); }, [loadBookings]);
 
@@ -281,7 +298,7 @@ export function Dashboard() {
                           <td key={colId}
                             className={COLUMN_DEFS[colId].align === 'right' ? 'text-right' : undefined}
                             style={renderCellStyle(colId)}>
-                            {renderCell(colId, b, isSplit, idx, handleStorno)}
+                            {renderCell(colId, b, isSplit, idx, handleStorno, receiptCounts[b.id], setReceiptsForBooking)}
                           </td>
                         ))}
                       </tr>
@@ -346,8 +363,18 @@ export function Dashboard() {
           gegenAccounts={gegenAccounts}
           costCenters={costCenters}
           dateMode={selectedSchoolObj?.defaultBookingDateMode ?? 'TODAY'}
+          belegarten={belegarten}
+          belegartDefaultId={selectedSchoolObj?.belegartDefaultId ?? null}
+          belegartRequired={selectedSchoolObj?.belegartRequired ?? false}
           onClose={() => setShowNewBooking(false)}
-          onCreated={() => { setShowNewBooking(false); loadBookings(); }}
+          onCreated={(opts) => {
+            setShowNewBooking(false);
+            loadBookings();
+            if (opts.noReceiptUploaded) {
+              setToast('Hinweis: Du hast keinen Beleg angehängt. Du kannst das später nachholen.');
+              setTimeout(() => setToast(''), 6000);
+            }
+          }}
         />
       )}
 
@@ -358,6 +385,45 @@ export function Dashboard() {
           isAdmin={user?.role === 'ADMIN'}
           onClose={() => setShowPdfExport(false)}
         />
+      )}
+
+      {/* Receipt Popover */}
+      {receiptsForBooking && (
+        <ReceiptPopover
+          bookingId={receiptsForBooking.id}
+          isFinalized={receiptsForBooking.isFinalized}
+          isAdmin={user?.role === 'ADMIN'}
+          belegarten={belegarten}
+          defaultBelegartId={selectedSchoolObj?.belegartDefaultId ?? null}
+          belegartRequired={selectedSchoolObj?.belegartRequired ?? false}
+          onClose={() => setReceiptsForBooking(null)}
+          onChanged={() => {
+            if (data) refreshReceiptCounts(data.bookings.map(b => b.id));
+          }}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: '1.5rem',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--color-warning, #8a5a00)',
+            color: '#fff',
+            padding: '0.75rem 1.25rem',
+            borderRadius: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+            fontSize: '0.9rem',
+            zIndex: 1200,
+            maxWidth: '90vw',
+          }}
+        >
+          {toast}
+        </div>
       )}
     </div>
   );
@@ -522,10 +588,14 @@ function emptySplitLine(): SplitLine {
 }
 
 function NewBookingModal({
-  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode, onClose, onCreated,
+  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode,
+  belegarten, belegartDefaultId, belegartRequired,
+  onClose, onCreated,
 }: {
   schoolId: string; isAdmin: boolean; kasseAccounts: Account[]; gegenAccounts: Account[];
-  costCenters: CostCenter[]; dateMode: 'TODAY' | 'EMPTY'; onClose: () => void; onCreated: () => void;
+  costCenters: CostCenter[]; dateMode: 'TODAY' | 'EMPTY';
+  belegarten: BelegartDto[]; belegartDefaultId: string | null; belegartRequired: boolean;
+  onClose: () => void; onCreated: (opts: { noReceiptUploaded: boolean }) => void;
 }) {
   const [mode, setMode] = useState<'single' | 'split'>('single');
 
@@ -544,6 +614,10 @@ function NewBookingModal({
 
   // Split mode fields
   const [splitLines, setSplitLines] = useState<SplitLine[]>([emptySplitLine(), emptySplitLine()]);
+
+  // Belege
+  const [belegartId, setBelegartId] = useState<string>(belegartDefaultId ?? '');
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   // Buchungstext-Vorschläge basierend auf Gegenkonto
   const [descSuggestions, setDescSuggestions] = useState<string[]>([]);
@@ -587,12 +661,18 @@ function NewBookingModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (belegartRequired && !belegartId && pendingFiles.length > 0) {
+      setError('Bitte eine Belegart auswählen.');
+      return;
+    }
     setError(''); setLoading(true);
     try {
       const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
 
+      let createdBookingId: string | null = null;
+
       if (mode === 'single') {
-        await api.post(`/bookings${schoolParam}`, {
+        const created = await api.post<{ id: string } | { bookings: { id: string }[] }>(`/bookings${schoolParam}`, {
           amount: parseFloat(amount.replace(',', '.')),
           debitCredit,
           accountId,
@@ -601,14 +681,16 @@ function NewBookingModal({
           description,
           bookingDate,
         });
+        createdBookingId = 'id' in created
+          ? created.id
+          : created.bookings?.[0]?.id ?? null;
       } else {
-        // Split booking
         if (Math.abs(splitRemaining) > 0.005) {
           setError(`Bitte alle Beträge aufteilen. Noch ${splitRemaining.toFixed(2)} EUR offen.`);
           setLoading(false);
           return;
         }
-        await api.post(`/bookings/split${schoolParam}`, {
+        const created = await api.post<{ bookings: { id: string }[] }>(`/bookings/split${schoolParam}`, {
           totalAmount: parseFloat(amount.replace(',', '.')),
           debitCredit,
           accountId,
@@ -621,8 +703,19 @@ function NewBookingModal({
             taxKey: l.taxKey || undefined,
           })),
         });
+        createdBookingId = created.bookings?.[0]?.id ?? null;
       }
-      onCreated();
+
+      // Belege hochladen (an Master-Zeile der Split- bzw. an Single-Buchung)
+      let uploaded = false;
+      if (createdBookingId && pendingFiles.length > 0) {
+        const extra: Record<string, string> = {};
+        if (belegartId) extra.belegartId = belegartId;
+        await api.upload(`/receipts/booking/${createdBookingId}`, pendingFiles, extra);
+        uploaded = true;
+      }
+
+      onCreated({ noReceiptUploaded: !uploaded });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Buchung fehlgeschlagen');
     } finally { setLoading(false); }
@@ -812,6 +905,35 @@ function NewBookingModal({
               </div>
             </>
           )}
+
+          {/* Belege */}
+          <div style={{
+            marginTop: '0.5rem',
+            padding: '0.75rem',
+            background: 'var(--color-secondary)',
+            borderRadius: '6px',
+          }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+              <div className="form-group" style={{ flex: '1 1 200px', marginBottom: 0 }}>
+                <label htmlFor="belegartId">
+                  Belegart{belegartRequired ? ' *' : ' (optional)'}
+                </label>
+                <select id="belegartId" className="form-control" value={belegartId}
+                  onChange={(e) => setBelegartId(e.target.value)}
+                  required={belegartRequired}>
+                  <option value="">— keine —</option>
+                  {belegarten.filter(b => b.isActive).map(b => (
+                    <option key={b.id} value={b.id}>{b.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <ReceiptUpload
+              files={pendingFiles}
+              onChange={setPendingFiles}
+              hint="Belege werden nach dem Speichern der Buchung hochgeladen"
+            />
+          </div>
 
           <div className="modal-actions">
             <button type="button" className="btn btn-outline" onClick={onClose}>Abbrechen</button>

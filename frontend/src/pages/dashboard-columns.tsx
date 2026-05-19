@@ -3,7 +3,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 export type ColumnId =
   | 'receiptNumber' | 'date' | 'description' | 'account' | 'counterAccount'
-  | 'costCenter' | 'einnahme' | 'ausgabe' | 'status' | 'createdBy' | 'actions';
+  | 'costCenter' | 'einnahme' | 'ausgabe' | 'status' | 'createdBy' | 'receipts' | 'actions';
 
 export const COLUMN_DEFS: Record<ColumnId, { label: string; align?: 'right' }> = {
   date: { label: 'Datum' },
@@ -16,12 +16,13 @@ export const COLUMN_DEFS: Record<ColumnId, { label: string; align?: 'right' }> =
   createdBy: { label: 'Gebucht von' },
   receiptNumber: { label: 'Beleg-Nr.' },
   counterAccount: { label: 'Gegenkonto' },
+  receipts: { label: 'Belege' },
   actions: { label: '' },
 };
 
 export const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'date', 'account', 'costCenter', 'einnahme', 'ausgabe', 'description',
-  'status', 'createdBy', 'receiptNumber', 'counterAccount', 'actions',
+  'status', 'createdBy', 'receiptNumber', 'counterAccount', 'receipts', 'actions',
 ];
 
 export function validateColumnOrder(input: unknown): ColumnId[] | null {
@@ -69,6 +70,8 @@ export function renderCell(
   isSplit: boolean,
   idx: number,
   onStorno: (id: string) => void,
+  receiptCount?: number,
+  onOpenReceipts?: (b: Booking) => void,
 ): React.ReactNode {
   switch (colId) {
     case 'receiptNumber':
@@ -113,6 +116,47 @@ export function renderCell(
       );
     case 'createdBy':
       return b.createdBy.displayName;
+    case 'receipts': {
+      // Bei Split-Buchungen Belege nur an Master-Zeile anzeigen
+      if (isSplit && idx !== 0) return null;
+      const count = receiptCount ?? 0;
+      const hasNone = count === 0;
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpenReceipts?.(b); }}
+          title={hasNone ? 'Diese Buchung hat keinen Beleg' : `${count} Beleg${count !== 1 ? 'e' : ''} ansehen`}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
+            fontSize: '1.1rem', padding: '2px 6px',
+            color: hasNone ? 'var(--color-text-light)' : 'inherit',
+          }}
+          aria-label={hasNone ? 'Keine Belege' : `${count} Belege`}
+        >
+          📎
+          {hasNone ? (
+            <span style={{
+              position: 'absolute', top: 0, right: 0,
+              width: '8px', height: '8px', borderRadius: '50%',
+              background: 'var(--color-error)',
+            }} aria-hidden="true" />
+          ) : (
+            <span style={{
+              marginLeft: '4px',
+              display: 'inline-block',
+              minWidth: '18px',
+              padding: '1px 6px',
+              borderRadius: '999px',
+              background: 'var(--color-success)',
+              color: '#fff',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              lineHeight: 1.3,
+            }}>{count}</span>
+          )}
+        </button>
+      );
+    }
     case 'actions':
       return !b.isStorno && !b.isFinalized && idx === 0 ? (
         <button className="btn btn-sm btn-danger" onClick={() => onStorno(b.id)}>

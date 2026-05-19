@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../api/client';
+import { BelegartenManager } from './BelegartenManager';
+import { DmsMappingEditor } from './DmsMappingEditor';
 
 interface KasseAccountRef {
   id: string;
@@ -16,6 +18,9 @@ interface School {
   kasseAccountId: string | null;
   kasseAccount: KasseAccountRef | null;
   defaultBookingDateMode: 'TODAY' | 'EMPTY';
+  dmsMandantenNummer: string | null;
+  belegartDefaultId: string | null;
+  belegartRequired: boolean;
 }
 
 interface Account {
@@ -35,6 +40,10 @@ export function Schools() {
   const [address, setAddress] = useState('');
   const [kasseAccountId, setKasseAccountId] = useState('');
   const [defaultBookingDateMode, setDefaultBookingDateMode] = useState<'TODAY' | 'EMPTY'>('TODAY');
+  const [dmsMandantenNummer, setDmsMandantenNummer] = useState('');
+  const [belegartRequired, setBelegartRequired] = useState(false);
+  const [belegartenFor, setBelegartenFor] = useState<School | null>(null);
+  const [dmsMappingFor, setDmsMappingFor] = useState<School | null>(null);
   const [error, setError] = useState('');
 
   const load = () => api.get<School[]>('/schools').then(setSchools);
@@ -46,6 +55,7 @@ export function Schools() {
   const resetForm = () => {
     setName(''); setCode(''); setAddress(''); setKasseAccountId('');
     setDefaultBookingDateMode('TODAY');
+    setDmsMandantenNummer(''); setBelegartRequired(false);
     setEditing(null); setShowForm(false); setError('');
   };
 
@@ -53,7 +63,14 @@ export function Schools() {
     e.preventDefault();
     setError('');
     try {
-      const data = { name, code, address: address || undefined, kasseAccountId: kasseAccountId || null, defaultBookingDateMode };
+      const data = {
+        name, code,
+        address: address || undefined,
+        kasseAccountId: kasseAccountId || null,
+        defaultBookingDateMode,
+        dmsMandantenNummer: dmsMandantenNummer.trim() || null,
+        belegartRequired,
+      };
       if (editing) {
         await api.put(`/schools/${editing.id}`, data);
       } else {
@@ -70,7 +87,20 @@ export function Schools() {
     setEditing(s); setName(s.name); setCode(s.code); setAddress(s.address || '');
     setKasseAccountId(s.kasseAccountId || '');
     setDefaultBookingDateMode(s.defaultBookingDateMode ?? 'TODAY');
+    setDmsMandantenNummer(s.dmsMandantenNummer ?? '');
+    setBelegartRequired(s.belegartRequired);
     setShowForm(true);
+  };
+
+  const updateDefaultBelegart = async (schoolId: string, belegartId: string | null) => {
+    try {
+      await api.put(`/schools/${schoolId}`, { belegartDefaultId: belegartId });
+      // lokale State aktualisieren
+      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, belegartDefaultId: belegartId } : s));
+      setBelegartenFor(prev => prev && prev.id === schoolId ? { ...prev, belegartDefaultId: belegartId } : prev);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Default konnte nicht gesetzt werden');
+    }
   };
 
   const handleDelete = async (s: School) => {
@@ -134,6 +164,19 @@ export function Schools() {
                   <option value="EMPTY">Leer lassen (Benutzer wählt selbst)</option>
                 </select>
               </div>
+              <div className="form-group">
+                <label htmlFor="dmsMnr">DMS-Mandantennummer (optional)</label>
+                <input id="dmsMnr" className="form-control" value={dmsMandantenNummer}
+                  onChange={(e) => setDmsMandantenNummer(e.target.value)}
+                  placeholder="z.B. 40" maxLength={50} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input type="checkbox" checked={belegartRequired}
+                  onChange={(e) => setBelegartRequired(e.target.checked)} />
+                Belegart ist beim Buchen Pflichtfeld
+              </label>
             </div>
             <div className="flex-gap">
               <button type="submit" className="btn btn-primary">{editing ? 'Speichern' : 'Anlegen'}</button>
@@ -141,6 +184,24 @@ export function Schools() {
             </div>
           </form>
         </div>
+      )}
+
+      {belegartenFor && (
+        <BelegartenManager
+          schoolId={belegartenFor.id}
+          schoolName={belegartenFor.name}
+          currentDefaultId={belegartenFor.belegartDefaultId}
+          onDefaultChange={(id) => updateDefaultBelegart(belegartenFor.id, id)}
+          onClose={() => setBelegartenFor(null)}
+        />
+      )}
+
+      {dmsMappingFor && (
+        <DmsMappingEditor
+          schoolId={dmsMappingFor.id}
+          schoolName={dmsMappingFor.name}
+          onClose={() => setDmsMappingFor(null)}
+        />
       )}
 
       <div className="card">
@@ -152,6 +213,7 @@ export function Schools() {
                 <th>Name</th>
                 <th>Adresse</th>
                 <th>Kassenkonto</th>
+                <th>DMS-Mnr</th>
                 <th>Status</th>
                 <th><span className="sr-only">Aktionen</span></th>
               </tr>
@@ -163,9 +225,12 @@ export function Schools() {
                   <td>{s.name}</td>
                   <td>{s.address || '–'}</td>
                   <td>{s.kasseAccount ? `${s.kasseAccount.accountNumber} – ${s.kasseAccount.name}` : '–'}</td>
+                  <td>{s.dmsMandantenNummer || '–'}</td>
                   <td>{s.isActive ? <span className="badge badge-finalized">Aktiv</span> : <span className="badge badge-storno">Inaktiv</span>}</td>
                   <td className="flex-gap">
                     <button className="btn btn-sm btn-outline" onClick={() => startEdit(s)}>Bearbeiten</button>
+                    <button className="btn btn-sm btn-outline" onClick={() => setBelegartenFor(s)}>Belegarten</button>
+                    <button className="btn btn-sm btn-outline" onClick={() => setDmsMappingFor(s)}>DMS-Mapping</button>
                     <button className="btn btn-sm btn-danger" onClick={() => handleDelete(s)}>Löschen</button>
                   </td>
                 </tr>

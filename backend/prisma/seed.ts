@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_BELEGARTEN } from '../src/services/belegartService';
+import { DEFAULT_DMS_MAPPING } from '../src/services/dmsMappingService';
 
 const prisma = new PrismaClient();
 
@@ -141,6 +143,21 @@ async function main() {
       where: { schoolId: school.id },
       update: {},
       create: { schoolId: school.id, lastNumber: 0 },
+    });
+
+    // Default-Belegarten (nur anlegen, wenn die Schule noch keine hat)
+    for (const ba of DEFAULT_BELEGARTEN) {
+      await prisma.belegart.upsert({
+        where: { schoolId_code: { schoolId: school.id, code: ba.code } },
+        update: { label: ba.label, sortOrder: ba.sortOrder },
+        create: { schoolId: school.id, ...ba },
+      });
+    }
+
+    // Default-DMS-Mapping (idempotent via @@unique(schoolId, dmsKey))
+    await prisma.dmsFieldMapping.createMany({
+      data: DEFAULT_DMS_MAPPING.map(row => ({ schoolId: school.id, ...row })),
+      skipDuplicates: true,
     });
 
     // Kassenbenutzer

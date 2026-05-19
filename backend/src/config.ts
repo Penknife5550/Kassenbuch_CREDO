@@ -10,4 +10,7 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
   jwtExpiresIn: 28800, // 8 hours in seconds
   nodeEnv,
+  uploadDir: process.env.UPLOAD_DIR || '/data/uploads',
+  maxReceiptSizeMb: parseInt(process.env.MAX_RECEIPT_SIZE_MB || '10', 10),
+  maxReceiptFilesPerUpload: parseInt(process.env.MAX_RECEIPT_FILES_PER_UPLOAD || '10', 10),
 };

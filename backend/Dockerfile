@@ -18,6 +18,7 @@ COPY --from=builder --chown=nodejs:nodejs /app/prisma ./prisma
 COPY --chown=nodejs:nodejs assets ./assets
 COPY --chown=nodejs:nodejs docker-entrypoint.sh ./
 RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
+RUN mkdir -p /data/uploads && chown -R nodejs:nodejs /data
 USER nodejs
 EXPOSE 3000
 CMD ["./docker-entrypoint.sh"]

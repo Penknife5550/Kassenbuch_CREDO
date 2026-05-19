@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../prismaClient';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
+import { createDefaultBelegartenForSchool } from '../services/belegartService';
+import { createDefaultDmsMappingForSchool } from '../services/dmsMappingService';
 import { getClientIp, getParam } from '../utils/request';
 
 export const schoolsRouter = Router();
@@ -66,6 +68,9 @@ const schoolSchema = z.object({
   anfangsbestandAccountId: z.string().uuid().nullable().optional(),
   kassendifferenzAccountId: z.string().uuid().nullable().optional(),
   defaultBookingDateMode: z.enum(['TODAY', 'EMPTY']).optional(),
+  dmsMandantenNummer: z.string().max(50).nullable().optional(),
+  belegartDefaultId: z.string().uuid().nullable().optional(),
+  belegartRequired: z.boolean().optional(),
 });
 
 schoolsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {
@@ -81,6 +86,9 @@ schoolsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {
     await prisma.receiptSequence.create({
       data: { schoolId: school.id, lastNumber: 0 },
     });
+
+    await createDefaultBelegartenForSchool(school.id);
+    await createDefaultDmsMappingForSchool(school.id);
 
     try {
       await logAudit({

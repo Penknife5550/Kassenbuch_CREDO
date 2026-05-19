@@ -28,6 +28,46 @@ enum BookingDateMode {
   EMPTY
 }
 
+enum FieldSource {
+  BOOKING_FIELD
+  CONSTANT
+}
+
+enum BookingField {
+  BOOKING_DATE
+  RECEIPT_NUMBER
+  AMOUNT
+  DEBIT_CREDIT
+  ACCOUNT_NUMBER
+  ACCOUNT_NAME
+  COUNTER_ACCOUNT_NUMBER
+  COUNTER_ACCOUNT_NAME
+  COST_CENTER_CODE
+  COST_CENTER_NAME
+  DESCRIPTION
+  TAX_KEY
+  BELEGART_CODE
+  BELEGART_LABEL
+  SCHOOL_NAME
+  SCHOOL_CODE
+  DMS_MANDANTEN_NR
+  DATEV_MANDANTEN_NR
+  CREATED_BY
+  FILE_INDEX
+}
+
+enum FieldFormat {
+  RAW
+  DATE_DDMMYYYY
+  DATE_ISO
+  DATE_YYYYMMDD
+  NUMBER_DE
+  NUMBER_DE_CURRENCY
+  NUMBER_DOT
+  UPPER
+  LOWER
+}
+
 model School {
   id                       String   @id @default(uuid())
   name                     String
@@ -37,6 +77,9 @@ model School {
   anfangsbestandAccountId  String?  @map("anfangsbestand_account_id")
   kassendifferenzAccountId String?  @map("kassendifferenz_account_id")
   defaultBookingDateMode   BookingDateMode @default(TODAY) @map("default_booking_date_mode")
+  dmsMandantenNummer       String?  @map("dms_mandanten_nummer")
+  belegartDefaultId        String?  @map("belegart_default_id")
+  belegartRequired         Boolean  @default(false) @map("belegart_required")
   isActive                 Boolean  @default(true)
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
@@ -44,10 +87,13 @@ model School {
   kasseAccount           Account?       @relation("SchoolKasse", fields: [kasseAccountId], references: [id])
   anfangsbestandAccount  Account?       @relation("SchoolAnfangsbestand", fields: [anfangsbestandAccountId], references: [id])
   kassendifferenzAccount Account?       @relation("SchoolKassendifferenz", fields: [kassendifferenzAccountId], references: [id])
+  belegartDefault        Belegart?      @relation("SchoolBelegartDefault", fields: [belegartDefaultId], references: [id])
   users                  User[]
   bookings               Booking[]
   dailyClosings          DailyClosing[]
   receiptSeq             ReceiptSequence[]
+  belegarten             Belegart[]     @relation("SchoolBelegarten")
+  dmsFieldMappings       DmsFieldMapping[]
 
   @@map("schools")
 }
@@ -69,6 +115,7 @@ model User {
   stornos  Booking[]  @relation("BookingStornoBy")
   closings DailyClosing[]
   auditLogs AuditLog[]
+  uploadedReceipts BookingReceipt[] @relation("ReceiptUploader")
 
   @@map("users")
 }
@@ -139,11 +186,76 @@ model Booking {
   stornoOf       Booking?      @relation("BookingStorno", fields: [stornoOfId], references: [id])
   stornoBookings Booking[]     @relation("BookingStorno")
   dailyClosingCorrection DailyClosing? @relation("DailyClosingCorrection")
+  receipts       BookingReceipt[]
 
   @@index([schoolId, bookingDate])
   @@index([schoolId, isFinalized])
   @@index([splitGroupId])
   @@map("bookings")
+}
+
+model Belegart {
+  id        String   @id @default(uuid())
+  schoolId  String   @map("school_id")
+  code      String
+  label     String
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  school                School           @relation("SchoolBelegarten", fields: [schoolId], references: [id], onDelete: Cascade)
+  defaultForSchools     School[]         @relation("SchoolBelegartDefault")
+  receipts              BookingReceipt[]
+
+  @@unique([schoolId, code])
+  @@index([schoolId, sortOrder])
+  @@map("belegarten")
+}
+
+model DmsFieldMapping {
+  id                 String       @id @default(uuid())
+  schoolId           String       @map("school_id")
+  source             FieldSource
+  bookingField       BookingField?
+  constantValue      String?      @map("constant_value")
+  dmsKey             String       @map("dms_key")
+  format             FieldFormat?
+  maxLength          Int?         @map("max_length")
+  sortOrder          Int          @default(0) @map("sort_order")
+  isActive           Boolean      @default(true) @map("is_active")
+  includeOnSeparator Boolean      @default(true) @map("include_on_separator")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, dmsKey])
+  @@index([schoolId, sortOrder])
+  @@map("dms_field_mappings")
+}
+
+model BookingReceipt {
+  id           String    @id @default(uuid())
+  bookingId    String    @map("booking_id")
+  belegartId   String?   @map("belegart_id")
+  originalName String    @map("original_name")
+  mimeType     String    @map("mime_type")
+  sizeBytes    Int       @map("size_bytes")
+  storagePath  String    @map("storage_path")
+  sha256       String
+  pageCount    Int?      @map("page_count")
+  uploadedById String    @map("uploaded_by_id")
+  uploadedAt   DateTime  @default(now()) @map("uploaded_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  booking    Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  belegart   Belegart? @relation(fields: [belegartId], references: [id])
+  uploadedBy User      @relation("ReceiptUploader", fields: [uploadedById], references: [id])
+
+  @@index([bookingId])
+  @@index([sha256])
+  @@map("booking_receipts")
 }
 
 model ReceiptSequence {
