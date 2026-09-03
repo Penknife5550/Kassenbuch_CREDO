@@ -7,12 +7,17 @@ echo "=== Kassenbuch Backend Start ==="
 echo "Applying database migrations..."
 npx prisma migrate deploy
 
-# 2. Seed (nutzt upsert – idempotent, überschreibt keine vorhandenen Daten)
-#    Kann mit SKIP_SEED=1 übersprungen werden falls gewünscht
+# 2. Seed - laeuft dank First-Run-Guard (prisma/seed.ts, Marker-Tabelle
+#    "seed_state") nur bei einer frisch aufgesetzten Datenbank. Bestehende
+#    Installationen ueberspringt er, damit von Anwendern geloeschte oder
+#    umbenannte Stammdaten nach einem Redeploy nicht zurueckkehren.
+#      SKIP_SEED=1   -> Seed komplett ueberspringen
+#      FORCE_SEED=1  -> Guard ignorieren, fehlende Standard-Stammdaten
+#                       ergaenzen (legt nur an, ueberschreibt nichts)
 if [ "${SKIP_SEED}" = "1" ]; then
   echo "SKIP_SEED=1 – Seeding übersprungen."
 else
-  echo "Running database seed (idempotent)..."
+  echo "Running database seed (First-Run-Guard aktiv)..."
   npx prisma db seed
 fi
 

@@ -318,3 +318,14 @@ model DatevExportConfig {
 
   @@map("datev_export_config")
 }
+
+/// Marker: haelt fest, dass diese Mandanten-Datenbank initial geseedet wurde.
+/// Genau eine Zeile mit id = "default". Bewusst eine eigene Tabelle und kein
+/// aus Stammdaten abgeleitetes Signal — Stammdaten sind in der UI editier- und
+/// loeschbar und taugen deshalb nicht als Initialisierungs-Nachweis.
+model SeedState {
+  id       String   @id
+  seededAt DateTime @default(now()) @map("seeded_at")
+
+  @@map("seed_state")
+}

@@ -42,18 +42,22 @@ export function Accounts() {
   const [editing, setEditing] = useState<Account | null>(null);
   const [form, setForm] = useState({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO' as Account['type'], defaultCostCenterId: '' });
   const [error, setError] = useState('');
-  const [deleteError, setDeleteError] = useState('');
+  const [listError, setListError] = useState('');
+  const [actionMsg, setActionMsg] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
   const [schoolSettingsMsg, setSchoolSettingsMsg] = useState('');
 
   const load = () => {
-    api.get<Account[]>('/accounts').then(setAccounts);
-    api.get<School[]>('/schools').then(setSchools);
-    api.get<CostCenter[]>('/cost-centers').then(setCostCenters);
+    const onLoadError = (e: unknown) =>
+      setListError(e instanceof Error ? e.message : 'Laden fehlgeschlagen');
+    api.get<Account[]>(`/accounts${showInactive ? '?includeInactive=true' : ''}`).then(setAccounts).catch(onLoadError);
+    api.get<School[]>('/schools').then(setSchools).catch(onLoadError);
+    api.get<CostCenter[]>('/cost-centers').then(setCostCenters).catch(onLoadError);
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [showInactive]);
 
   const filtered = filter ? accounts.filter((a) => a.type === filter) : accounts;
-  const gegenkonten = accounts.filter((a) => a.type === 'GEGENKONTO');
+  const gegenkonten = accounts.filter((a) => a.type === 'GEGENKONTO' && a.isActive);
 
   const resetForm = () => {
     setForm({ accountNumber: '', name: '', description: '', type: 'GEGENKONTO', defaultCostCenterId: '' });
@@ -81,13 +85,25 @@ export function Accounts() {
   };
 
   const handleDelete = async (account: Account) => {
-    setDeleteError('');
-    if (!confirm(`Konto "${account.accountNumber} – ${account.name}" wirklich löschen?`)) return;
+    setListError(''); setActionMsg('');
+    if (!confirm(`Konto "${account.accountNumber} – ${account.name}" wirklich entfernen? Konten mit Buchungen werden deaktiviert statt gelöscht — sie bleiben für Journal und Auswertungen erhalten.`)) return;
     try {
-      await api.del(`/accounts/${account.id}`);
+      const res = await api.del<{ message: string; deactivated: boolean }>(`/accounts/${account.id}`);
+      setActionMsg(res.message);
       load();
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Löschen fehlgeschlagen');
+      setListError(e instanceof Error ? e.message : 'Entfernen fehlgeschlagen');
+    }
+  };
+
+  const handleReactivate = async (account: Account) => {
+    setListError(''); setActionMsg('');
+    try {
+      await api.post(`/accounts/${account.id}/reactivate`);
+      setActionMsg(`Konto ${account.accountNumber} – ${account.name} wurde wieder aktiviert.`);
+      load();
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Aktivieren fehlgeschlagen');
     }
   };
 
@@ -171,7 +187,8 @@ export function Accounts() {
         </div>
       )}
 
-      {deleteError && <div className="alert alert-error mb-3" role="alert">{deleteError}</div>}
+      {listError && <div className="alert alert-error mb-3" role="alert">{listError}</div>}
+      {actionMsg && <div className="alert alert-success mb-3" role="status">{actionMsg}</div>}
 
       <div className="card mb-3">
         <div className="flex-gap mb-2">
@@ -179,6 +196,14 @@ export function Accounts() {
           <button className={`btn btn-sm ${filter === 'KASSE' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilter('KASSE')}>Kassenkonten</button>
           <button className={`btn btn-sm ${filter === 'TRANSIT' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilter('TRANSIT')}>Transitkonten</button>
           <button className={`btn btn-sm ${filter === 'GEGENKONTO' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilter('GEGENKONTO')}>Gegenkonten</button>
+          <label className="flex-gap" style={{ marginLeft: 'auto', alignItems: 'center', fontSize: '0.85rem' }}>
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            Deaktivierte Konten anzeigen
+          </label>
         </div>
         <div className="table-wrapper">
           <table>
@@ -187,15 +212,22 @@ export function Accounts() {
             </thead>
             <tbody>
               {filtered.map((a) => (
-                <tr key={a.id}>
+                <tr key={a.id} style={a.isActive ? undefined : { opacity: 0.6 }}>
                   <td style={{ fontWeight: 600 }}>{a.accountNumber}</td>
-                  <td>{a.name}</td>
+                  <td>
+                    {a.name}
+                    {!a.isActive && <span className="badge badge-user" style={{ marginLeft: '0.5rem' }}>Deaktiviert</span>}
+                  </td>
                   <td><span className="badge badge-user">{TYPE_LABELS[a.type]}</span></td>
                   <td className="text-light">{a.description || '–'}</td>
                   <td>
                     <div className="flex-gap">
                       <button className="btn btn-sm btn-outline" onClick={() => startEdit(a)}>Bearbeiten</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(a)}>Löschen</button>
+                      {a.isActive ? (
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(a)}>Entfernen</button>
+                      ) : (
+                        <button className="btn btn-sm btn-outline" onClick={() => handleReactivate(a)}>Aktivieren</button>
+                      )}
                     </div>
                   </td>
                 </tr>

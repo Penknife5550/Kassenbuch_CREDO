@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { DEFAULT_BELEGARTEN } from '../src/services/belegartService';
 import { DEFAULT_DMS_MAPPING } from '../src/services/dmsMappingService';
+import { isDatabaseInitialized, markDatabaseInitialized } from '../src/services/seedStateService';
 
 const prisma = new PrismaClient();
 
@@ -64,6 +65,18 @@ const COST_CENTERS = [
 
 // ─── Hauptlogik ──────────────────────────────────────────────────────────────
 async function main() {
+  // First-Run-Guard: Der Seed ist ein Bootstrap fuer eine FRISCHE Datenbank,
+  // kein Abgleich bei jedem Start. Ohne diesen Guard legte der Seed bei jedem
+  // Container-Start die Standard-Stammdaten per upsert neu an — von Anwendern
+  // geloeschte Konten tauchten dadurch nach jedem Redeploy wieder auf.
+  if (process.env.FORCE_SEED === '1') {
+    console.log('FORCE_SEED=1 — First-Run-Guard uebersprungen, fehlende Standard-Stammdaten werden ergaenzt.');
+  } else if (await isDatabaseInitialized(prisma)) {
+    console.log('Datenbank ist bereits initialisiert — Seed uebersprungen.');
+    console.log('Geloeschte oder umbenannte Stammdaten bleiben unveraendert.');
+    return;
+  }
+
   console.log('Seeding database...\n');
 
   // ── 1. Admin-Benutzer ────────────────────────────────────────────────────
@@ -84,7 +97,9 @@ async function main() {
   for (const acc of ACCOUNTS) {
     await prisma.account.upsert({
       where: { accountNumber_type: { accountNumber: acc.accountNumber, type: acc.type } },
-      update: { name: acc.name },
+      // Nur anlegen, nie ueberschreiben: ein in der UI umbenanntes Konto
+      // behaelt seinen Namen, auch wenn der Seed erneut laeuft.
+      update: {},
       create: acc,
     });
   }
@@ -122,12 +137,9 @@ async function main() {
     // Schule anlegen
     const school = await prisma.school.upsert({
       where: { code: s.code },
-      update: {
-        name: s.name,
-        kasseAccountId: kasseAccount?.id ?? undefined,
-        anfangsbestandAccountId: anfangsbestandAccount?.id ?? undefined,
-        kassendifferenzAccountId: kassendifferenzAccount?.id ?? undefined,
-      },
+      // Nur anlegen: Schulname und Konten-Zuweisungen sind in der Admin-UI
+      // pflegbar und duerfen vom Seed nicht zurueckgesetzt werden.
+      update: {},
       create: {
         name: s.name,
         code: s.code,
@@ -149,7 +161,7 @@ async function main() {
     for (const ba of DEFAULT_BELEGARTEN) {
       await prisma.belegart.upsert({
         where: { schoolId_code: { schoolId: school.id, code: ba.code } },
-        update: { label: ba.label, sortOrder: ba.sortOrder },
+        update: {},
         create: { schoolId: school.id, ...ba },
       });
     }
@@ -165,7 +177,7 @@ async function main() {
     const displayName = `Kasse ${s.name}`;
     await prisma.user.upsert({
       where: { username },
-      update: { schoolId: school.id, displayName },
+      update: {},
       create: {
         username,
         passwordHash: defaultHash,
@@ -187,7 +199,7 @@ async function main() {
   for (const cc of COST_CENTERS) {
     await prisma.costCenter.upsert({
       where: { code: cc.code },
-      update: { name: cc.name },
+      update: {},
       create: cc,
     });
   }
@@ -206,6 +218,10 @@ async function main() {
     },
   });
   console.log('DATEV-Konfiguration angelegt');
+
+  // Marker erst NACH allen Schritten setzen: bricht der Seed vorher ab, bleibt
+  // die Datenbank unmarkiert und der naechste Start versucht es erneut.
+  await markDatabaseInitialized(prisma);
 
   // ── Zusammenfassung ──────────────────────────────────────────────────────
   console.log('\n' + '═'.repeat(72));
@@ -227,5 +243,12 @@ async function main() {
 }
 
 main()
-  .catch(console.error)
+  .catch((err) => {
+    // Exit-Code 1, damit `set -e` im docker-entrypoint.sh den Start abbricht:
+    // ein Server auf einer halb geseedeten Datenbank waere schlimmer als ein
+    // sichtbar fehlgeschlagener Start. Der Marker bleibt ungesetzt, der naechste
+    // Start holt die fehlenden Standard-Stammdaten nach.
+    console.error('SEED FEHLGESCHLAGEN — kein Marker gesetzt, naechster Start versucht es erneut:', err);
+    process.exitCode = 1;
+  })
   .finally(() => prisma.$disconnect());

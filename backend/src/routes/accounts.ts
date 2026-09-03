@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prismaClient';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
+import { resolveAccountRemoval } from '../services/accountService';
 import { getClientIp, getParam } from '../utils/request';
 
 export const accountsRouter = Router();
@@ -14,6 +15,11 @@ accountsRouter.get('/', async (req: Request, res: Response) => {
     const schoolId = req.query.schoolId as string | undefined;
     const where: Record<string, unknown> = {};
     if (type) where.type = type;
+
+    // Deaktivierte Konten sind in Buchungsmaske und Auswertungen unsichtbar.
+    // Nur die Konten-Verwaltung fordert sie ueber includeInactive=true an.
+    const includeInactive = req.user?.role === 'ADMIN' && req.query.includeInactive === 'true';
+    if (!includeInactive) where.isActive = true;
 
     let accounts = await prisma.account.findMany({
       where,
@@ -89,6 +95,10 @@ accountsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {
 
     res.status(201).json(account);
   } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+      res.status(409).json({ error: 'Es gibt bereits ein Konto mit dieser Nummer und diesem Typ. Möglicherweise ist es deaktiviert — blenden Sie deaktivierte Konten ein und aktivieren Sie es wieder.' });
+      return;
+    }
     console.error('POST /accounts error:', err);
     res.status(500).json({ error: 'Interner Serverfehler' });
   }
@@ -103,7 +113,8 @@ accountsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) 
       return;
     }
 
-    // Prüfen ob Buchungen auf das Konto referenzieren
+    // Buchungs-Referenzen und Schul-Zuweisung entscheiden, ob geloescht,
+    // deaktiviert oder gar nichts getan wird.
     const bookingCount = await prisma.booking.count({
       where: {
         OR: [
@@ -112,12 +123,7 @@ accountsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) 
         ],
       },
     });
-    if (bookingCount > 0) {
-      res.status(409).json({ error: `Konto kann nicht gelöscht werden — ${bookingCount} Buchung(en) referenzieren dieses Konto.` });
-      return;
-    }
 
-    // Prüfen ob als Kassen-/Anfangsbestands-/Kassendifferenzkonto zugewiesen
     const schoolAssignment = await prisma.school.findFirst({
       where: {
         OR: [
@@ -128,17 +134,33 @@ accountsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) 
       },
       select: { name: true },
     });
-    if (schoolAssignment) {
-      res.status(409).json({ error: `Konto kann nicht gelöscht werden — zugewiesen an Schule "${schoolAssignment.name}".` });
+
+    const removal = resolveAccountRemoval({
+      bookingCount,
+      assignedSchoolName: schoolAssignment?.name,
+      isActive: account.isActive,
+    });
+
+    if (removal.kind === 'blocked') {
+      res.status(409).json({ error: removal.message });
       return;
     }
 
-    await prisma.account.delete({ where: { id: accountId } });
+    if (removal.kind === 'noop') {
+      res.json({ message: removal.message, deactivated: true });
+      return;
+    }
+
+    if (removal.kind === 'deactivate') {
+      await prisma.account.update({ where: { id: accountId }, data: { isActive: false } });
+    } else {
+      await prisma.account.delete({ where: { id: accountId } });
+    }
 
     try {
       await logAudit({
         userId: req.user!.userId,
-        action: 'DELETE_ACCOUNT',
+        action: removal.kind === 'deactivate' ? 'DEACTIVATE_ACCOUNT' : 'DELETE_ACCOUNT',
         entityType: 'account',
         entityId: accountId,
         oldValue: account,
@@ -148,9 +170,47 @@ accountsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) 
       console.error('Audit log failed:', auditErr);
     }
 
-    res.json({ message: 'Konto gelöscht' });
+    res.json({ message: removal.message, deactivated: removal.kind === 'deactivate' });
   } catch (err) {
     console.error('DELETE /accounts/:id error:', err);
+    res.status(500).json({ error: 'Interner Serverfehler' });
+  }
+});
+
+// Deaktiviertes Konto wieder aktivieren. Bewusst ein eigener Endpunkt statt
+// isActive im PUT-Schema: so gibt es genau einen Weg, ein Konto stillzulegen
+// (DELETE) und genau einen, es zurueckzuholen.
+accountsRouter.post('/:id/reactivate', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const accountId = getParam(req, 'id');
+    const existing = await prisma.account.findUnique({ where: { id: accountId } });
+    if (!existing) {
+      res.status(404).json({ error: 'Konto nicht gefunden' });
+      return;
+    }
+
+    const account = await prisma.account.update({
+      where: { id: accountId },
+      data: { isActive: true },
+    });
+
+    try {
+      await logAudit({
+        userId: req.user!.userId,
+        action: 'REACTIVATE_ACCOUNT',
+        entityType: 'account',
+        entityId: accountId,
+        oldValue: existing,
+        newValue: account,
+        ipAddress: getClientIp(req),
+      });
+    } catch (auditErr) {
+      console.error('Audit log failed:', auditErr);
+    }
+
+    res.json(account);
+  } catch (err) {
+    console.error('POST /accounts/:id/reactivate error:', err);
     res.status(500).json({ error: 'Interner Serverfehler' });
   }
 });
@@ -198,6 +258,10 @@ accountsRouter.put('/:id', requireAdmin, async (req: Request, res: Response) => 
 
     res.json(account);
   } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+      res.status(409).json({ error: 'Es gibt bereits ein Konto mit dieser Nummer und diesem Typ. Möglicherweise ist es deaktiviert — blenden Sie deaktivierte Konten ein und aktivieren Sie es wieder.' });
+      return;
+    }
     console.error('PUT /accounts/:id error:', err);
     res.status(500).json({ error: 'Interner Serverfehler' });
   }
