@@ -672,7 +672,7 @@ function NewBookingModal({
       let createdBookingId: string | null = null;
 
       if (mode === 'single') {
-        const created = await api.post<{ id: string } | { bookings: { id: string }[] }>(`/bookings${schoolParam}`, {
+        const created = await api.post<{ id: string }>(`/bookings${schoolParam}`, {
           amount: parseFloat(amount.replace(',', '.')),
           debitCredit,
           accountId,
@@ -681,16 +681,14 @@ function NewBookingModal({
           description,
           bookingDate,
         });
-        createdBookingId = 'id' in created
-          ? created.id
-          : created.bookings?.[0]?.id ?? null;
+        createdBookingId = created.id ?? null;
       } else {
         if (Math.abs(splitRemaining) > 0.005) {
           setError(`Bitte alle Beträge aufteilen. Noch ${splitRemaining.toFixed(2)} EUR offen.`);
           setLoading(false);
           return;
         }
-        const created = await api.post<{ bookings: { id: string }[] }>(`/bookings/split${schoolParam}`, {
+        const created = await api.post<{ id: string }[]>(`/bookings/split${schoolParam}`, {
           totalAmount: parseFloat(amount.replace(',', '.')),
           debitCredit,
           accountId,
@@ -703,7 +701,8 @@ function NewBookingModal({
             taxKey: l.taxKey || undefined,
           })),
         });
-        createdBookingId = created.bookings?.[0]?.id ?? null;
+        // Belege haengen an der ersten Zeile der Splittgruppe.
+        createdBookingId = created[0]?.id ?? null;
       }
 
       // Belege hochladen (an Master-Zeile der Split- bzw. an Single-Buchung)
