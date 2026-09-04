@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { DEFAULT_BELEGARTEN } from '../src/services/belegartService';
 import { DEFAULT_DMS_MAPPING } from '../src/services/dmsMappingService';
+import { DEFAULT_COST_CENTERS } from '../src/services/costCenterService';
 import { isDatabaseInitialized, markDatabaseInitialized } from '../src/services/seedStateService';
 
 const prisma = new PrismaClient();
@@ -55,13 +56,10 @@ const ACCOUNTS = [
 ];
 
 // ─── Kostenstellen ───────────────────────────────────────────────────────────
-const COST_CENTERS = [
-  { code: '10', name: 'Verwaltung' },
-  { code: '20', name: 'Schule' },
-  { code: '30', name: 'Mensa' },
-  { code: '40', name: 'Betreuung' },
-  { code: '50', name: 'Veranstaltungen' },
-];
+// Liegen in src/services/costCenterService.ts, weil auch das Entfernen sie
+// kennen muss: Standard-Kostenstellen werden nie hart geloescht, sonst brachte
+// ein Lauf mit FORCE_SEED=1 sie zurueck. Gleiches Muster wie DEFAULT_BELEGARTEN.
+const COST_CENTERS = DEFAULT_COST_CENTERS;
 
 // ─── Hauptlogik ──────────────────────────────────────────────────────────────
 async function main() {

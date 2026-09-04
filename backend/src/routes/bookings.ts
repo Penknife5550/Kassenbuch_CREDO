@@ -6,11 +6,37 @@ import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import { getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx, isDayFinalized } from '../services/bookingService';
+import { checkCostCentersUsable } from '../services/costCenterService';
 import { generateKassenbuchPdf } from '../services/pdfService';
 import { getClientIp, getParam } from '../utils/request';
 
 export const bookingsRouter = Router();
 bookingsRouter.use(authenticate);
+
+/**
+ * Meldung fuer eine Kostenstelle, die es beim Buchen nicht mehr gibt.
+ *
+ * Das Zod-Schema prueft nur die UUID-Form. Ein Browser-Tab, der vor einer
+ * Deaktivierung geoeffnet wurde, kennt die Kostenstelle aber weiterhin — ohne
+ * Pruefung koennte er darauf buchen und sie damit zurueck in Journal,
+ * DATEV-KOST1 und DMS-Trennseite holen. Gilt nur fuer NEUE Buchungen; ein
+ * Storno uebernimmt die Kostenstelle des Originals und wird nicht geprueft.
+ */
+const COST_CENTER_GONE = 'Diese Kostenstelle ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
+
+/**
+ * Faengt den Sekundenbruchteil zwischen Pruefung und INSERT ab: verschwindet
+ * eine Kostenstelle oder ein Konto genau dann, weist die Datenbank das INSERT
+ * per Fremdschluessel ab (P2003). Ohne diesen Zweig saehe der Anwender
+ * ausgerechnet dort einen nichtssagenden 500er.
+ */
+function foreignKeyMessage(err: unknown): string | null {
+  if (!err || typeof err !== 'object' || !('code' in err) || err.code !== 'P2003') return null;
+  const field = String((err as { meta?: { field_name?: unknown } }).meta?.field_name ?? '');
+  return field.includes('cost_center')
+    ? COST_CENTER_GONE
+    : 'Ein ausgewähltes Konto ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
+}
 
 bookingsRouter.get('/', async (req: Request, res: Response) => {
   try {
@@ -262,6 +288,12 @@ bookingsRouter.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    const costCenterCheck = await checkCostCentersUsable(prisma, [parsed.data.costCenterId]);
+    if (!costCenterCheck.ok) {
+      res.status(400).json({ error: COST_CENTER_GONE });
+      return;
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -345,6 +377,11 @@ bookingsRouter.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json(booking);
   } catch (err) {
+    const fkMessage = foreignKeyMessage(err);
+    if (fkMessage) {
+      res.status(400).json({ error: fkMessage });
+      return;
+    }
     if (err instanceof Error && err.message.startsWith('BALANCE:')) {
       res.status(409).json({ error: err.message.slice(8) });
       return;
@@ -392,6 +429,12 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
       res.status(400).json({
         error: `Summe der Split-Zeilen (${linesSum.toFixed(2)}) stimmt nicht mit Gesamtbetrag (${parsed.data.totalAmount.toFixed(2)}) überein.`,
       });
+      return;
+    }
+
+    const costCenterCheck = await checkCostCentersUsable(prisma, parsed.data.lines.map((l) => l.costCenterId));
+    if (!costCenterCheck.ok) {
+      res.status(400).json({ error: COST_CENTER_GONE });
       return;
     }
 
@@ -484,6 +527,11 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
 
     res.status(201).json(bookings);
   } catch (err) {
+    const fkMessage = foreignKeyMessage(err);
+    if (fkMessage) {
+      res.status(400).json({ error: fkMessage });
+      return;
+    }
     if (err instanceof Error && err.message.startsWith('BALANCE:')) {
       res.status(409).json({ error: err.message.slice(8) });
       return;
@@ -628,6 +676,11 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
     // Return single storno for simple bookings, array for splits
     res.status(201).json(originalsToStorno.length > 1 ? stornoBookings : stornoBookings[0]);
   } catch (err) {
+    const fkMessage = foreignKeyMessage(err);
+    if (fkMessage) {
+      res.status(400).json({ error: fkMessage });
+      return;
+    }
     if (err instanceof Error && err.message.startsWith('BALANCE:')) {
       res.status(409).json({ error: err.message.slice(8) });
       return;

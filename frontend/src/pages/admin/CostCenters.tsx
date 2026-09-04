@@ -15,9 +15,17 @@ export function CostCenters() {
   const [editing, setEditing] = useState<CostCenter | null>(null);
   const [form, setForm] = useState({ code: '', name: '', description: '' });
   const [error, setError] = useState('');
+  const [listError, setListError] = useState('');
+  const [actionMsg, setActionMsg] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
 
-  const load = () => api.get<CostCenter[]>('/cost-centers').then(setCostCenters);
-  useEffect(() => { load(); }, []);
+  const load = () => {
+    setListError('');
+    api.get<CostCenter[]>(`/cost-centers${showInactive ? '?includeInactive=true' : ''}`)
+      .then(setCostCenters)
+      .catch((e) => setListError(e instanceof Error ? e.message : 'Laden fehlgeschlagen'));
+  };
+  useEffect(() => { load(); }, [showInactive]);
 
   const resetForm = () => {
     setForm({ code: '', name: '', description: '' });
@@ -26,7 +34,7 @@ export function CostCenters() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError(''); setActionMsg('');
     try {
       const data = { ...form, description: form.description || undefined };
       if (editing) {
@@ -37,6 +45,29 @@ export function CostCenters() {
       resetForm(); load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Fehler');
+    }
+  };
+
+  const handleDelete = async (cc: CostCenter) => {
+    setListError(''); setActionMsg('');
+    if (!confirm(`Kostenstelle "${cc.code} – ${cc.name}" wirklich entfernen? Kostenstellen mit Buchungen werden deaktiviert statt gelöscht — sie bleiben für Journal, DATEV und DMS erhalten.`)) return;
+    try {
+      const res = await api.del<{ message: string; deactivated: boolean }>(`/cost-centers/${cc.id}`);
+      setActionMsg(res.message);
+      load();
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Entfernen fehlgeschlagen');
+    }
+  };
+
+  const handleReactivate = async (cc: CostCenter) => {
+    setListError(''); setActionMsg('');
+    try {
+      await api.post(`/cost-centers/${cc.id}/reactivate`);
+      setActionMsg(`Kostenstelle ${cc.code} – ${cc.name} wurde wieder aktiviert.`);
+      load();
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : 'Aktivieren fehlgeschlagen');
     }
   };
 
@@ -80,7 +111,20 @@ export function CostCenters() {
         </div>
       )}
 
+      {listError && <div className="alert alert-error mb-3" role="alert">{listError}</div>}
+      {actionMsg && <div className="alert alert-success mb-3" role="status">{actionMsg}</div>}
+
       <div className="card">
+        <div className="flex-gap mb-2">
+          <label className="flex-gap" style={{ marginLeft: 'auto', alignItems: 'center', fontSize: '0.85rem' }}>
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+            />
+            Deaktivierte Kostenstellen anzeigen
+          </label>
+        </div>
         <div className="table-wrapper">
           <table>
             <thead>
@@ -88,11 +132,23 @@ export function CostCenters() {
             </thead>
             <tbody>
               {costCenters.map((cc) => (
-                <tr key={cc.id}>
+                <tr key={cc.id} style={cc.isActive ? undefined : { opacity: 0.6 }}>
                   <td style={{ fontWeight: 600 }}>{cc.code}</td>
-                  <td>{cc.name}</td>
+                  <td>
+                    {cc.name}
+                    {!cc.isActive && <span className="badge badge-user" style={{ marginLeft: '0.5rem' }}>Deaktiviert</span>}
+                  </td>
                   <td className="text-light">{cc.description || '–'}</td>
-                  <td><button className="btn btn-sm btn-outline" onClick={() => startEdit(cc)}>Bearbeiten</button></td>
+                  <td>
+                    <div className="flex-gap">
+                      <button className="btn btn-sm btn-outline" onClick={() => startEdit(cc)}>Bearbeiten</button>
+                      {cc.isActive ? (
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(cc)}>Entfernen</button>
+                      ) : (
+                        <button className="btn btn-sm btn-outline" onClick={() => handleReactivate(cc)}>Aktivieren</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

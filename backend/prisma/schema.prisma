@@ -131,7 +131,9 @@ model Account {
   createdAt            DateTime    @default(now()) @map("created_at")
   updatedAt            DateTime    @updatedAt @map("updated_at")
 
-  defaultCostCenter        CostCenter? @relation("AccountDefaultCostCenter", fields: [defaultCostCenterId], references: [id])
+  // Restrict wie bei den Buchungen: die Zuweisung darf nicht still
+  // verschwinden, wenn jemand gleichzeitig die Kostenstelle entfernt.
+  defaultCostCenter        CostCenter? @relation("AccountDefaultCostCenter", fields: [defaultCostCenterId], references: [id], onDelete: Restrict)
   bookingsAsAccount        Booking[] @relation("BookingAccount")
   bookingsAsCounterAccount Booking[] @relation("BookingCounterAccount")
   assignedSchools            School[] @relation("SchoolKasse")
@@ -180,7 +182,10 @@ model Booking {
   school         School      @relation(fields: [schoolId], references: [id])
   account        Account     @relation("BookingAccount", fields: [accountId], references: [id])
   counterAccount Account     @relation("BookingCounterAccount", fields: [counterAccountId], references: [id])
-  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
+  // Restrict statt des Prisma-Defaults SetNull: eine Kostenstelle, auf die
+  // gebucht wurde, darf nicht geloescht werden — sonst verloere die Buchung
+  // ihre KSt still. Siehe Migration 20260904120000_cost_center_fk_restrict.
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
   createdBy      User        @relation("BookingCreator", fields: [createdById], references: [id])
   stornoBy       User?       @relation("BookingStornoBy", fields: [stornoById], references: [id])
   stornoOf       Booking?      @relation("BookingStorno", fields: [stornoOfId], references: [id])

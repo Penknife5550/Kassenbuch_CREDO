@@ -4,6 +4,7 @@ import { prisma } from '../prismaClient';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import { resolveAccountRemoval } from '../services/accountService';
+import { checkCostCentersUsable } from '../services/costCenterService';
 import { getClientIp, getParam } from '../utils/request';
 
 export const accountsRouter = Router();
@@ -58,10 +59,8 @@ const accountSchema = z.object({
 
 async function validateDefaultCostCenter(id: string | null | undefined): Promise<string | null> {
   if (!id) return null;
-  const cc = await prisma.costCenter.findUnique({ where: { id }, select: { isActive: true } });
-  if (!cc) return 'Kostenstelle nicht gefunden';
-  if (!cc.isActive) return 'Kostenstelle ist inaktiv';
-  return null;
+  const check = await checkCostCentersUsable(prisma, [id]);
+  return check.ok ? null : check.message;
 }
 
 accountsRouter.post('/', requireAdmin, async (req: Request, res: Response) => {

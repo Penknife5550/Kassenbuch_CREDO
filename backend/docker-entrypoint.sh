@@ -12,8 +12,13 @@ npx prisma migrate deploy
 #    Installationen ueberspringt er, damit von Anwendern geloeschte oder
 #    umbenannte Stammdaten nach einem Redeploy nicht zurueckkehren.
 #      SKIP_SEED=1   -> Seed komplett ueberspringen
-#      FORCE_SEED=1  -> Guard ignorieren, fehlende Standard-Stammdaten
-#                       ergaenzen (legt nur an, ueberschreibt nichts)
+#      FORCE_SEED=1  -> Guard ignorieren und fehlende Standard-Stammdaten
+#                       ergaenzen. ACHTUNG: "fehlend" heisst auch "vom Anwender
+#                       bewusst geloescht" — geloeschte Standard-Konten und
+#                       -Kostenstellen kehren dadurch zurueck, und zwar aktiv.
+#                       Deaktivierte Stammdaten (isActive=false) bleiben
+#                       unangetastet, weil der Seed nur anlegt und nie updatet.
+#                       Nur fuer frische oder halb aufgesetzte Installationen.
 if [ "${SKIP_SEED}" = "1" ]; then
   echo "SKIP_SEED=1 – Seeding übersprungen."
 else
