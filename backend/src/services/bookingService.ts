@@ -129,6 +129,21 @@ export async function createBookingInTx(tx: TxClient, input: NewBooking) {
 }
 
 /**
+ * Stellt IN der Transaktion sicher, dass keine der Buchungen schon storniert
+ * ist. Die Route prueft das vorab — zwischen jener Pruefung und dem Beginn der
+ * Transaktion kann ein zweiter Storno derselben Buchung aber schon fertig
+ * sein. Ohne diese Pruefung liefe er ein zweites Mal durch, und der
+ * Kassenbestand stimmte nicht mehr. Ueberlappen sich die beiden Transaktionen
+ * stattdessen, bricht Serializable eine von ihnen ab (P2034).
+ *
+ * Wirft `STORNO:<Meldung>` — bookingErrorToResponse macht daraus die 409-Antwort.
+ */
+export async function assertNotStornoed(tx: TxClient, bookingIds: string[], message: string): Promise<void> {
+  const stornos = await tx.booking.count({ where: { stornoOfId: { in: bookingIds } } });
+  if (stornos > 0) throw new Error(`STORNO:${message}`);
+}
+
+/**
  * Meldung fuer eine Kostenstelle, die es beim Buchen nicht mehr gibt.
  *
  * Das Zod-Schema prueft nur die UUID-Form. Ein Browser-Tab, der vor einer
@@ -172,8 +187,8 @@ const WRITE_CONFLICT_ATTEMPTS = 5;
  * gelingt; die kurze, zufaellige Pause entzerrt mehrere Wartende.
  *
  * Nur fuer Transaktionen, die alle ihre Pruefungen selbst enthalten. Eine
- * Pruefung VOR der Transaktion ("schon storniert?") liefe beim zweiten Versuch
- * nicht noch einmal.
+ * Pruefung VOR der Transaktion ("Tag schon abgeschlossen?") liefe beim zweiten
+ * Versuch nicht noch einmal.
  */
 export async function retryOnWriteConflict<T>(
   run: () => Promise<T>,
@@ -190,6 +205,9 @@ export async function retryOnWriteConflict<T>(
   }
 }
 
+/** Fachliche Absagen aus einer Transaktion tragen eines dieser Praefixe; der Text dahinter geht an den Anwender. */
+const CONFLICT_PREFIXES = ['BALANCE:', 'STORNO:'];
+
 /**
  * Uebersetzt die erwartbaren Fehler einer Buchungs-Transaktion in Status und
  * Meldung. null heisst: unbekannter Fehler, der Aufrufer antwortet mit 500.
@@ -197,8 +215,10 @@ export async function retryOnWriteConflict<T>(
 export function bookingErrorToResponse(err: unknown): { status: number; error: string } | null {
   const fkMessage = foreignKeyMessage(err);
   if (fkMessage) return { status: 400, error: fkMessage };
-  if (err instanceof Error && err.message.startsWith('BALANCE:')) {
-    return { status: 409, error: err.message.slice(8) };
+  if (err instanceof Error) {
+    const { message } = err;
+    const prefix = CONFLICT_PREFIXES.find((p) => message.startsWith(p));
+    if (prefix) return { status: 409, error: message.slice(prefix.length) };
   }
   if (isWriteConflict(err)) return { status: 409, error: WRITE_CONFLICT };
   return null;

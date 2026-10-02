@@ -7,7 +7,7 @@ import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import {
   getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx, isDayFinalized,
-  resolveBookingDate, createBookingInTx, bookingErrorToResponse, COST_CENTER_GONE,
+  resolveBookingDate, createBookingInTx, assertNotStornoed, bookingErrorToResponse, COST_CENTER_GONE,
 } from '../services/bookingService';
 import { checkCostCentersUsable } from '../services/costCenterService';
 import { generateKassenbuchPdf } from '../services/pdfService';
@@ -464,6 +464,9 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
   }
 });
 
+const ALREADY_STORNOED = 'Diese Buchung wurde bereits storniert';
+const SPLIT_ALREADY_STORNOED = 'Diese Splittbuchung wurde bereits storniert';
+
 bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
   try {
     const schoolId = getSchoolScope(req);
@@ -493,7 +496,7 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
     }
 
     if (original.stornoBookings.length > 0) {
-      res.status(409).json({ error: 'Diese Buchung wurde bereits storniert' });
+      res.status(409).json({ error: ALREADY_STORNOED });
       return;
     }
 
@@ -521,7 +524,7 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
       // Check if any booking in the group is already stornoed or finalized
       for (const ob of originalsToStorno) {
         if (ob.stornoBookings.length > 0) {
-          res.status(409).json({ error: 'Diese Splittbuchung wurde bereits storniert' });
+          res.status(409).json({ error: SPLIT_ALREADY_STORNOED });
           return;
         }
         if (ob.isFinalized) {
@@ -540,6 +543,14 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
 
     // Atomic transaction: balance check + receipt number + storno creation
     const stornoBookings = await prisma.$transaction(async (tx) => {
+      // Die Pruefungen oben liefen vor der Transaktion. Ein zweiter Storno
+      // derselben Buchung kann inzwischen fertig sein — hier faellt er auf.
+      await assertNotStornoed(
+        tx,
+        originalsToStorno.map((b) => b.id),
+        originalsToStorno.length > 1 ? SPLIT_ALREADY_STORNOED : ALREADY_STORNOED,
+      );
+
       if (reverseDebitCredit === 'H') {
         const currentBalance = await calculateCashBalanceTx(tx, schoolId);
         const newBalance = currentBalance.sub(totalAmount);

@@ -22,6 +22,7 @@ import {
   isDayFinalized,
   resolveBookingDate,
   createBookingInTx,
+  assertNotStornoed,
   bookingErrorToResponse,
   retryOnWriteConflict,
   COST_CENTER_GONE,
@@ -266,6 +267,26 @@ describe('bookingService', () => {
     });
   });
 
+  describe('assertNotStornoed', () => {
+    it('laesst den Storno zu, solange keine Stornobuchung existiert', async () => {
+      const tx = { booking: { count: vi.fn().mockResolvedValue(0) } };
+
+      await expect(assertNotStornoed(tx as any, ['b-1', 'b-2'], 'Diese Splittbuchung wurde bereits storniert'))
+        .resolves.toBeUndefined();
+      expect(tx.booking.count).toHaveBeenCalledWith({ where: { stornoOfId: { in: ['b-1', 'b-2'] } } });
+    });
+
+    // Zwei fast gleichzeitige Stornos derselben Buchung: der zweite hat die
+    // Vorab-Pruefung der Route schon hinter sich, wenn der erste fertig wird.
+    // Ohne die Pruefung in der Transaktion wurde er ein zweites Mal gebucht.
+    it('bricht ab, wenn inzwischen ein Storno derselben Buchung gespeichert wurde', async () => {
+      const tx = { booking: { count: vi.fn().mockResolvedValue(1) } };
+
+      await expect(assertNotStornoed(tx as any, ['b-1'], 'Diese Buchung wurde bereits storniert'))
+        .rejects.toThrow('STORNO:Diese Buchung wurde bereits storniert');
+    });
+  });
+
   describe('bookingErrorToResponse', () => {
     it('macht aus dem Saldo-Fehler eine 409 ohne das interne Praefix', () => {
       const result = bookingErrorToResponse(new Error('BALANCE:Kassenbestand darf nicht negativ werden. Aktueller Bestand: 50 EUR'));
@@ -274,6 +295,11 @@ describe('bookingService', () => {
         status: 409,
         error: 'Kassenbestand darf nicht negativ werden. Aktueller Bestand: 50 EUR',
       });
+    });
+
+    it('macht aus dem Storno-Konflikt eine 409 ohne das interne Praefix', () => {
+      expect(bookingErrorToResponse(new Error('STORNO:Diese Buchung wurde bereits storniert')))
+        .toEqual({ status: 409, error: 'Diese Buchung wurde bereits storniert' });
     });
 
     it('nennt bei verletztem Fremdschluessel die Kostenstelle oder das Konto', () => {
