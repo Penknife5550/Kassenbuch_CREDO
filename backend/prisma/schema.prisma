@@ -197,6 +197,7 @@ model Booking {
   @@index([schoolId, bookingDate])
   @@index([schoolId, isFinalized])
   @@index([splitGroupId])
+  @@index([stornoOfId])
   @@map("bookings")
 }
 
