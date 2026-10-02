@@ -278,7 +278,7 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
     layout: 'portrait',
     margins: { top: 40, bottom: 50, left: 50, right: 50 },
     info: {
-      Title: `Eigenbeleg ${schoolName} ${closingDate.toISOString().slice(0, 10)}`,
+      Title: `Kassensturz-Beleg ${schoolName} ${closingDate.toISOString().slice(0, 10)}`,
       Author: 'CREDO Verwaltung',
     },
   });
@@ -293,7 +293,7 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
   }
   const titleX = marginLeft + (hasLogo ? 58 : 0);
   doc.font('Helvetica-Bold').fontSize(16).fillColor(CREDO_PRIMARY);
-  doc.text('KASSENSTURZ-EIGENBELEG', titleX, 33);
+  doc.text('KASSENSTURZ-BELEG', titleX, 33);
   doc.font('Helvetica').fontSize(9).fillColor(CREDO_GRAY);
   doc.text(`${schoolName} (${schoolCode})  |  Datum: ${formatDateDE(closingDate)}`, titleX, 52);
   doc.text(`Durchgeführt von: ${closedByName}`, titleX, 64);
@@ -380,7 +380,8 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
     doc.font('Helvetica').fontSize(9).fillColor(CREDO_PRIMARY);
     const commentHeight = doc.heightOfString(comment, { width: contentWidth - 8 });
     doc.rect(marginLeft, y, contentWidth, commentHeight + 12).fill('#FFF8F8');
-    doc.text(comment, marginLeft + 4, y + 6, { width: contentWidth - 8 });
+    // fill() hat die Farbe auf den Kasten gestellt — ohne Zuruecksetzen stuende der Text unsichtbar darin
+    doc.fillColor(CREDO_PRIMARY).text(comment, marginLeft + 4, y + 6, { width: contentWidth - 8 });
     y += commentHeight + 20;
   }
 
@@ -390,25 +391,37 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
     doc.text('Erstellte Korrekturbuchung', marginLeft, y);
     y += 14;
 
+    // Die beiden Kontospalten teilen sich den Platz rechts vom Betrag
+    const accountX = marginLeft + 210;
+    const accountW = 135;
+    const counterX = accountX + accountW + 10;
+    const counterW = marginLeft + contentWidth - counterX - 4;
+
     doc.rect(marginLeft, y, contentWidth, 14).fill('#F0F0F0');
     doc.font('Helvetica-Bold').fontSize(8).fillColor(CREDO_PRIMARY);
     doc.text('Belegnr.', marginLeft + 4, y + 3, { width: 50 });
     doc.text('Art', marginLeft + 60, y + 3, { width: 60 });
     doc.text('Betrag', marginLeft + 130, y + 3, { width: 70, align: 'right' });
-    doc.text('Konto', marginLeft + 210, y + 3, { width: 80 });
-    doc.text('Gegenkonto', marginLeft + 300, y + 3, { width: 90 });
+    doc.text('Konto', accountX, y + 3, { width: accountW });
+    doc.text('Gegenkonto', counterX, y + 3, { width: counterW });
     y += 16;
 
     const debitCreditLabel = correctionBooking.debitCredit === 'S' ? 'Einnahme (S)' : 'Ausgabe (H)';
+    const accountText = `${correctionBooking.account.accountNumber} ${correctionBooking.account.name}`;
+    const counterText = `${correctionBooking.counterAccount.accountNumber} ${correctionBooking.counterAccount.name}`;
     doc.font('Helvetica').fontSize(8).fillColor(CREDO_PRIMARY);
     doc.text(String(correctionBooking.receiptNumber), marginLeft + 4, y + 2, { width: 50 });
     doc.text(debitCreditLabel, marginLeft + 60, y + 2, { width: 60 });
     doc.fillColor(correctionBooking.debitCredit === 'S' ? CREDO_GREEN : CREDO_RED);
     doc.text(formatCurrency(correctionBooking.amount), marginLeft + 130, y + 2, { width: 70, align: 'right' });
     doc.fillColor(CREDO_PRIMARY);
-    doc.text(`${correctionBooking.account.accountNumber} ${correctionBooking.account.name}`, marginLeft + 210, y + 2, { width: 80, ellipsis: true });
-    doc.text(`${correctionBooking.counterAccount.accountNumber} ${correctionBooking.counterAccount.name}`, marginLeft + 300, y + 2, { width: 90, ellipsis: true });
-    y += 18;
+    doc.text(accountText, accountX, y + 2, { width: accountW });
+    doc.text(counterText, counterX, y + 2, { width: counterW });
+    // Ein langer Kontoname bricht um: die Zeile waechst mit, statt in den Buchungstext darunter zu laufen
+    y += Math.max(
+      doc.heightOfString(accountText, { width: accountW }),
+      doc.heightOfString(counterText, { width: counterW }),
+    ) + 9;
 
     doc.font('Helvetica').fontSize(7).fillColor(CREDO_GRAY);
     doc.text(`Buchungstext: ${correctionBooking.description}`, marginLeft + 4, y, { width: contentWidth });

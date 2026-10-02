@@ -79,8 +79,10 @@ dailyClosingRouter.get('/status', async (req: Request, res: Response) => {
   }
 });
 
-// GET /daily-closing/eigenbeleg/:id – must be before /:id if needed
-dailyClosingRouter.get('/eigenbeleg/:id', async (req: Request, res: Response) => {
+// GET /daily-closing/kassensturz/:id – must be before /:id if needed
+// Der Kassensturz-Beleg zum Abschluss. Der "Eigenbeleg" ist seit dem
+// gleichnamigen Reiter der Beleg einer Buchung (routes/eigenbelege.ts).
+dailyClosingRouter.get('/kassensturz/:id', async (req: Request, res: Response) => {
   try {
     const schoolId = getSchoolScope(req);
     if (!schoolId) {
@@ -130,13 +132,13 @@ dailyClosingRouter.get('/eigenbeleg/:id', async (req: Request, res: Response) =>
     });
 
     const dateStr = closing.closingDate.toISOString().slice(0, 10);
-    const filename = `Eigenbeleg_${closing.school.code}_${dateStr}.pdf`;
+    const filename = `Kassensturz_${closing.school.code}_${dateStr}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     pdf.pipe(res);
   } catch (err) {
-    console.error('GET /daily-closing/eigenbeleg error:', err);
+    console.error('GET /daily-closing/kassensturz error:', err);
     res.status(500).json({ error: 'PDF-Generierung fehlgeschlagen' });
   }
 });

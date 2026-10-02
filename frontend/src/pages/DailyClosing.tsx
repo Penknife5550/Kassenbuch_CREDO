@@ -84,8 +84,7 @@ export function DailyClosing() {
   const [counts, setCounts] = useState<DenominationCounts>(emptyDenominations());
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
-  const [downloadingEigenbeleg, setDownloadingEigenbeleg] = useState(false);
-  const [lastClosingId, setLastClosingId] = useState<string | null>(null);
+  const [downloadingKassensturz, setDownloadingKassensturz] = useState(false);
 
   const istbestandCents = calcIstbestandCents(counts);
   const istbestand = istbestandCents / 100;
@@ -133,6 +132,24 @@ export function DailyClosing() {
     ? accounts.find((a) => a.id === selectedSchoolObj.kassendifferenzAccountId)
     : accounts.find((a) => a.accountNumber === '2370');
 
+  // Der Abschluss von heute, wenn er eine Differenz hatte — nur dann gibt es einen
+  // Kassensturz-Beleg. Aus den geladenen Abschlüssen abgeleitet statt aus der Maske:
+  // nach dem Abschluss enthält der Sollbestand die Korrekturbuchung, die Differenz
+  // der Maske ist dann null.
+  const closingWithDifference = history.find(
+    (c) => c.closingDate.slice(0, 10) === status?.date && parseFloat(c.difference) !== 0,
+  );
+
+  // Der Kassensturz-Beleg zum Abschluss: Zählprotokoll, Soll, Ist und Korrekturbuchung
+  const downloadKassensturz = (closingId: string) => {
+    const schoolParam = user?.role === 'ADMIN' ? `?schoolId=${selectedSchool}` : '';
+    const today = new Date().toISOString().split('T')[0];
+    return api.download(
+      `/daily-closing/kassensturz/${closingId}${schoolParam}`,
+      `Kassensturz_${selectedSchoolObj?.code ?? 'Kasse'}_${today}.pdf`,
+    );
+  };
+
   const handleClose = async () => {
     setError('');
     setLoading(true);
@@ -150,20 +167,15 @@ export function DailyClosing() {
       }
 
       const result = await api.post<{ id: string }>(`/daily-closing${schoolParam}`, body);
-      setLastClosingId(result.id);
 
       if (hasDifference) {
-        setDownloadingEigenbeleg(true);
+        setDownloadingKassensturz(true);
         try {
-          const today = new Date().toISOString().split('T')[0];
-          await api.download(
-            `/daily-closing/eigenbeleg/${result.id}${schoolParam}`,
-            `Eigenbeleg_${today}.pdf`
-          );
+          await downloadKassensturz(result.id);
         } catch {
           // Non-critical
         } finally {
-          setDownloadingEigenbeleg(false);
+          setDownloadingKassensturz(false);
         }
       }
 
@@ -370,7 +382,7 @@ export function DailyClosing() {
             <>
               <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
                 ⚠ {differenceCents > 0 ? 'Überschuss' : 'Fehlbetrag'} von {fmtEur(Math.abs(difference))} festgestellt.
-                Eine Korrekturbuchung wird automatisch erstellt und ein Eigenbeleg generiert.
+                Eine Korrekturbuchung wird automatisch erstellt und ein Kassensturz-Beleg erzeugt.
               </div>
 
               <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -419,7 +431,7 @@ export function DailyClosing() {
               style={{ fontSize: '1rem' }}
             >
               {loading
-                ? (downloadingEigenbeleg ? 'Eigenbeleg wird erstellt...' : 'Wird durchgeführt...')
+                ? (downloadingKassensturz ? 'Kassensturz-Beleg wird erstellt...' : 'Wird durchgeführt...')
                 : hasDifference
                   ? 'Korrekturbuchung erstellen & Abschluss durchführen'
                   : 'Tagesabschluss durchführen'}
@@ -434,19 +446,14 @@ export function DailyClosing() {
           <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>✅</div>
           <h2>Tagesabschluss abgeschlossen</h2>
           <p className="text-light">Der Tagesabschluss für heute wurde erfolgreich durchgeführt.</p>
-          {lastClosingId && hasDifference && (
-            <button
-              className="btn btn-outline mt-2"
-              onClick={async () => {
-                const schoolParam = user?.role === 'ADMIN' ? `?schoolId=${selectedSchool}` : '';
-                const today = new Date().toISOString().split('T')[0];
-                await api.download(
-                  `/daily-closing/eigenbeleg/${lastClosingId}${schoolParam}`,
-                  `Eigenbeleg_${today}.pdf`
-                );
-              }}
-            >
-              Eigenbeleg erneut herunterladen
+          {closingWithDifference && (
+            <button className="btn btn-outline mt-2"
+              onClick={() => {
+                setError('');
+                downloadKassensturz(closingWithDifference.id)
+                  .catch((e) => setError(e instanceof Error ? e.message : 'Der Kassensturz-Beleg konnte nicht geladen werden.'));
+              }}>
+              Kassensturz-Beleg erneut herunterladen
             </button>
           )}
         </div>
