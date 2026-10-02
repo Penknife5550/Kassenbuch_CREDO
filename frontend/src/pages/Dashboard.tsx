@@ -606,6 +606,8 @@ function NewBookingModal({
   onClose: () => void; onCreated: (opts: { noReceiptUploaded: boolean }) => void;
 }) {
   const [mode, setMode] = useState<'single' | 'split' | 'eigenbeleg'>(initialMode);
+  // Das Eigenbeleg-Formular wird erst eingehängt, wenn sein Reiter zum ersten Mal gezeigt wird
+  const [eigenbelegOpened, setEigenbelegOpened] = useState(initialMode === 'eigenbeleg');
   // Gesetzt, sobald ein Eigenbeleg gebucht ist — die Maske zeigt dann die Bestätigung
   const [eigenbelegDone, setEigenbelegDone] = useState<EigenbelegResult | null>(null);
   // Solange ein Eigenbeleg gebucht wird, bleibt die Maske offen. Schließen bräche
@@ -745,17 +747,9 @@ function NewBookingModal({
         Splittbuchung
       </button>
       <button className={`btn btn-sm ${mode === 'eigenbeleg' ? 'btn-primary' : 'btn-outline'}`}
-        disabled={eigenbelegBooking} onClick={() => setMode('eigenbeleg')}>
+        disabled={eigenbelegBooking} onClick={() => { setMode('eigenbeleg'); setEigenbelegOpened(true); }}>
         Eigenbeleg
       </button>
-    </div>
-  );
-
-  const wideModal = (content: React.ReactNode, onDismiss?: () => void) => (
-    <div className="modal-overlay" onClick={onDismiss} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
-        {content}
-      </div>
     </div>
   );
 
@@ -763,40 +757,45 @@ function NewBookingModal({
   // Journal muss neu laden.
   if (eigenbelegDone) {
     const finish = () => onCreated({ noReceiptUploaded: false });
-    return wideModal(<EigenbelegDone result={eigenbelegDone} onClose={finish} />, finish);
-  }
-
-  if (mode === 'eigenbeleg') {
-    return wideModal(
-      <>
-        <h2 id="modal-title">Neue Buchung</h2>
-        {modeToggle}
-        <EigenbelegForm
-          schoolId={schoolId}
-          isAdmin={isAdmin}
-          kasseAccounts={kasseAccounts}
-          gegenAccounts={gegenAccounts}
-          costCenters={costCenters}
-          dateMode={dateMode}
-          onCancel={onClose}
-          onBookingChange={setEigenbelegBooking}
-          onBooked={setEigenbelegDone}
-        />
-      </>,
-      eigenbelegBooking ? undefined : onClose,
+    return (
+      <div className="modal-overlay" onClick={finish} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
+          <EigenbelegDone result={eigenbelegDone} onClose={finish} />
+        </div>
+      </div>
     );
   }
 
+  // Beide Formulare bleiben eingehängt und werden nur ausgeblendet. So gehen
+  // die Eingaben nicht verloren, wenn jemand den Reiter wechselt.
+  const eigenbelegTab = mode === 'eigenbeleg';
+
   return (
-    <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={mode === 'split' ? { maxWidth: '720px' } : undefined}>
+    <div className="modal-overlay" onClick={eigenbelegBooking ? undefined : onClose} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={mode === 'single' ? undefined : { maxWidth: '720px' }}>
         <h2 id="modal-title">Neue Buchung</h2>
 
         {modeToggle}
 
-        {error && <div className="alert alert-error" role="alert">{error}</div>}
+        {eigenbelegOpened && (
+          <div hidden={!eigenbelegTab}>
+            <EigenbelegForm
+              schoolId={schoolId}
+              isAdmin={isAdmin}
+              kasseAccounts={kasseAccounts}
+              gegenAccounts={gegenAccounts}
+              costCenters={costCenters}
+              dateMode={dateMode}
+              onCancel={onClose}
+              onBookingChange={setEigenbelegBooking}
+              onBooked={setEigenbelegDone}
+            />
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit}>
+        {error && !eigenbelegTab && <div className="alert alert-error" role="alert">{error}</div>}
+
+        <form onSubmit={handleSubmit} hidden={eigenbelegTab}>
           {/* Common header fields */}
           <div className="grid-2">
             <div className="form-group">
