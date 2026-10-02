@@ -215,7 +215,7 @@ describe('dailyClosing route - business logic', () => {
     function makeTx(state: { balance: number; closed?: boolean }) {
       return {
         dailyClosing: {
-          findUnique: vi.fn().mockResolvedValue(state.closed ? { id: 'closing-1' } : null),
+          findFirst: vi.fn().mockResolvedValue(state.closed ? { closingDate: new Date() } : null),
           create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'closing-new', ...data })),
         },
         $queryRaw: vi.fn().mockResolvedValue([{ balance: new Prisma.Decimal(state.balance) }]),

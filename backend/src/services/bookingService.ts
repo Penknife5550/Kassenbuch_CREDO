@@ -42,36 +42,35 @@ export async function calculateCashBalanceTx(tx: TxClient, schoolId: string): Pr
   return result[0]?.balance ?? new Prisma.Decimal(0);
 }
 
-export async function isDayFinalized(
-  schoolId: string,
-  date: Date,
-  db: Pick<TxClient, 'dailyClosing'> = prisma,
-): Promise<boolean> {
-  const closing = await db.dailyClosing.findUnique({
-    where: {
-      schoolId_closingDate: {
-        schoolId,
-        closingDate: date,
-      },
-    },
-  });
-  return !!closing;
+/** Meldung fuer eine Buchung in einen abgeschlossenen Tag. Das Datum kommt aus einer DATE-Spalte (UTC-Mitternacht). */
+export function dayClosedMessage(closedThrough: Date): string {
+  const [year, month, day] = closedThrough.toISOString().slice(0, 10).split('-');
+  return `Die Kasse ist bis einschließlich ${day}.${month}.${year} abgeschlossen. Buchungen sind erst mit einem späteren Datum möglich.`;
 }
 
-export const DAY_CLOSED = 'Tagesabschluss für dieses Datum bereits durchgeführt. Keine Buchungen möglich.';
-
 /**
- * Stellt IN der Transaktion sicher, dass der Tag nicht abgeschlossen ist. Eine
- * Pruefung vor der Transaktion reicht nicht: der Tagesabschluss kann bis zur
- * Buchung fertig werden, und die Buchung landete dann unfestgeschrieben im
- * abgeschlossenen Tag, an Soll- und Istbestand des Abschlusses vorbei.
- * Ueberlappen sich Abschluss und Buchung, bricht Serializable eine der beiden
- * Transaktionen ab (P2034).
+ * Stellt IN der Transaktion sicher, dass der Tag nicht abgeschlossen ist.
  *
- * Wirft `CLOSED:<Meldung>` — bookingErrorToResponse macht daraus die 409-Antwort.
+ * Ein Tagesabschluss schliesst nicht nur seinen eigenen Tag, sondern alle
+ * Tage bis dahin: er schreibt alle Buchungen bis zu seinem Datum fest und
+ * haelt den gezaehlten Bestand fest. Eine spaeter rueckdatierte Buchung laege
+ * unfestgeschrieben davor, und der Bestand des Abschlusses passte nicht mehr
+ * zum Journal. Deshalb zaehlt jeder Abschluss ab dem Buchungsdatum.
+ *
+ * Eine Pruefung vor der Transaktion reicht nicht: der Tagesabschluss kann bis
+ * zur Buchung fertig werden. Ueberlappen sich Abschluss und Buchung, bricht
+ * Serializable eine der beiden Transaktionen ab (P2034).
+ *
+ * Wirft `CLOSED:<Meldung>` — bookingErrorToResponse macht daraus die
+ * 409-Antwort. Ohne eigene Meldung nennt sie den Tag, bis zu dem abgeschlossen ist.
  */
-export async function assertDayOpen(tx: TxClient, schoolId: string, date: Date, message = DAY_CLOSED): Promise<void> {
-  if (await isDayFinalized(schoolId, date, tx)) throw new Error(`CLOSED:${message}`);
+export async function assertDayOpen(tx: TxClient, schoolId: string, date: Date, message?: string): Promise<void> {
+  const closing = await tx.dailyClosing.findFirst({
+    where: { schoolId, closingDate: { gte: date } },
+    orderBy: { closingDate: 'desc' },
+    select: { closingDate: true },
+  });
+  if (closing) throw new Error(`CLOSED:${message ?? dayClosedMessage(closing.closingDate)}`);
 }
 
 export type BookingDateResult =

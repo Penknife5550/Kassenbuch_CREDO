@@ -5,9 +5,6 @@ import { Prisma } from '@prisma/client';
 vi.mock('../prismaClient', () => ({
   prisma: {
     $queryRaw: vi.fn(),
-    dailyClosing: {
-      findUnique: vi.fn(),
-    },
     receiptSequence: {
       update: vi.fn(),
     },
@@ -19,7 +16,6 @@ import {
   getNextReceiptNumber,
   calculateCashBalance,
   calculateCashBalanceTx,
-  isDayFinalized,
   resolveBookingDate,
   createBookingInTx,
   assertCostCentersUsable,
@@ -27,9 +23,9 @@ import {
   assertNotStornoed,
   bookingErrorToResponse,
   retryOnWriteConflict,
+  dayClosedMessage,
   COST_CENTER_GONE,
   ACCOUNT_GONE,
-  DAY_CLOSED,
   WRITE_CONFLICT,
 } from './bookingService';
 
@@ -136,49 +132,6 @@ describe('bookingService', () => {
     });
   });
 
-  describe('isDayFinalized', () => {
-    it('should return true when a daily closing exists for the date', async () => {
-      vi.mocked(prisma.dailyClosing.findUnique).mockResolvedValue({
-        id: 'closing-1',
-        schoolId: 'school-1',
-        closingDate: new Date('2024-03-15'),
-        expectedBalance: new Prisma.Decimal(1000),
-        actualBalance: new Prisma.Decimal(1000),
-        difference: new Prisma.Decimal(0),
-        closedById: 'user-1',
-        createdAt: new Date(),
-      });
-
-      const result = await isDayFinalized('school-1', new Date('2024-03-15'));
-
-      expect(result).toBe(true);
-    });
-
-    it('should return false when no daily closing exists', async () => {
-      vi.mocked(prisma.dailyClosing.findUnique).mockResolvedValue(null);
-
-      const result = await isDayFinalized('school-1', new Date('2024-03-15'));
-
-      expect(result).toBe(false);
-    });
-
-    it('should query with correct schoolId and date composite key', async () => {
-      vi.mocked(prisma.dailyClosing.findUnique).mockResolvedValue(null);
-
-      const testDate = new Date('2024-06-01');
-      await isDayFinalized('school-abc', testDate);
-
-      expect(prisma.dailyClosing.findUnique).toHaveBeenCalledWith({
-        where: {
-          schoolId_closingDate: {
-            schoolId: 'school-abc',
-            closingDate: testDate,
-          },
-        },
-      });
-    });
-  });
-
   describe('resolveBookingDate', () => {
     const midnight = (date: Date) => {
       const copy = new Date(date);
@@ -230,12 +183,12 @@ describe('bookingService', () => {
       createdById: 'user-1',
     };
 
-    function makeTx(balance: number, state: { dayClosed?: boolean; costCenters?: Array<{ id: string; isActive: boolean }> } = {}) {
+    function makeTx(balance: number, state: { closedThrough?: Date; costCenters?: Array<{ id: string; isActive: boolean }> } = {}) {
       return {
         $queryRaw: vi.fn().mockResolvedValue([{ balance: new Prisma.Decimal(balance) }]),
         receiptSequence: { update: vi.fn().mockResolvedValue({ lastNumber: 43 }) },
         booking: { create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'booking-1', ...data })) },
-        dailyClosing: { findUnique: vi.fn().mockResolvedValue(state.dayClosed ? { id: 'closing-1' } : null) },
+        dailyClosing: { findFirst: vi.fn().mockResolvedValue(state.closedThrough ? { closingDate: state.closedThrough } : null) },
         costCenter: { findMany: vi.fn().mockResolvedValue(state.costCenters ?? []) },
       };
     }
@@ -279,12 +232,9 @@ describe('bookingService', () => {
     // ist. Die Pruefung in der Transaktion faengt das ab — auch beim
     // Wiederholungsversuch nach einem Schreibkonflikt mit dem Abschluss.
     it('bucht nicht in einen abgeschlossenen Tag und zieht dann keine Belegnummer', async () => {
-      const tx = makeTx(250, { dayClosed: true });
+      const tx = makeTx(250, { closedThrough: new Date('2024-03-15') });
 
-      await expect(createBookingInTx(tx as any, input)).rejects.toThrow(`CLOSED:${DAY_CLOSED}`);
-      expect(tx.dailyClosing.findUnique).toHaveBeenCalledWith({
-        where: { schoolId_closingDate: { schoolId: 'school-1', closingDate: input.bookingDate } },
-      });
+      await expect(createBookingInTx(tx as any, input)).rejects.toThrow(/^CLOSED:Die Kasse ist bis einschließlich 15\.03\.2024 abgeschlossen/);
       expect(tx.receiptSequence.update).not.toHaveBeenCalled();
       expect(tx.booking.create).not.toHaveBeenCalled();
     });
@@ -310,18 +260,43 @@ describe('bookingService', () => {
   });
 
   describe('assertDayOpen', () => {
-    it('fragt den Abschluss ueber die Transaktion ab, nicht ueber die globale Verbindung', async () => {
-      const tx = { dailyClosing: { findUnique: vi.fn().mockResolvedValue(null) } };
-
-      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).resolves.toBeUndefined();
-      expect(tx.dailyClosing.findUnique).toHaveBeenCalledTimes(1);
-      expect(prisma.dailyClosing.findUnique).not.toHaveBeenCalled();
+    const txWith = (closingDate: Date | null) => ({
+      dailyClosing: { findFirst: vi.fn().mockResolvedValue(closingDate ? { closingDate } : null) },
     });
 
-    it('bricht mit der Meldung des Aufrufers ab, wenn der Tag abgeschlossen ist', async () => {
-      const tx = { dailyClosing: { findUnique: vi.fn().mockResolvedValue({ id: 'closing-1' }) } };
+    it('laesst die Buchung zu, wenn es ab ihrem Datum keinen Abschluss gibt', async () => {
+      const tx = txWith(null);
 
-      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).rejects.toThrow(`CLOSED:${DAY_CLOSED}`);
+      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).resolves.toBeUndefined();
+    });
+
+    // Ein Abschluss schliesst alle Tage bis dahin. Gefragt wird deshalb nach
+    // jedem Abschluss AB dem Buchungsdatum, nicht nur nach dem des Tages selbst:
+    // sonst liesse sich nach dem Abschluss vom Freitag noch auf Mittwoch buchen.
+    it('fragt nach dem juengsten Abschluss ab dem Buchungsdatum', async () => {
+      const tx = txWith(null);
+      const wednesday = new Date('2024-03-13');
+
+      await assertDayOpen(tx as any, 'school-1', wednesday);
+
+      expect(tx.dailyClosing.findFirst).toHaveBeenCalledWith({
+        where: { schoolId: 'school-1', closingDate: { gte: wednesday } },
+        orderBy: { closingDate: 'desc' },
+        select: { closingDate: true },
+      });
+    });
+
+    it('nennt den Tag, bis zu dem die Kasse abgeschlossen ist', async () => {
+      const friday = txWith(new Date('2024-03-15'));
+
+      await expect(assertDayOpen(friday as any, 'school-1', new Date('2024-03-13'))).rejects.toThrow(
+        'CLOSED:Die Kasse ist bis einschließlich 15.03.2024 abgeschlossen. Buchungen sind erst mit einem späteren Datum möglich.',
+      );
+    });
+
+    it('bricht mit der Meldung des Aufrufers ab, wenn er eine mitgibt', async () => {
+      const tx = txWith(new Date('2024-03-15'));
+
       await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'), 'Tagesabschluss bereits durchgeführt'))
         .rejects.toThrow('CLOSED:Tagesabschluss bereits durchgeführt');
     });
@@ -385,7 +360,8 @@ describe('bookingService', () => {
     });
 
     it('meldet den abgeschlossenen Tag als 409 und die fehlende Kostenstelle als 400', () => {
-      expect(bookingErrorToResponse(new Error(`CLOSED:${DAY_CLOSED}`))).toEqual({ status: 409, error: DAY_CLOSED });
+      const closed = dayClosedMessage(new Date('2024-03-15'));
+      expect(bookingErrorToResponse(new Error(`CLOSED:${closed}`))).toEqual({ status: 409, error: closed });
       expect(bookingErrorToResponse(new Error(`GONE:${COST_CENTER_GONE}`))).toEqual({ status: 400, error: COST_CENTER_GONE });
     });
 

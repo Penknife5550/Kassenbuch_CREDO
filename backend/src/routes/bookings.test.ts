@@ -34,7 +34,6 @@ vi.mock('../services/bookingService', () => ({
   getNextReceiptNumber: vi.fn().mockResolvedValue(1),
   calculateCashBalance: vi.fn().mockResolvedValue(new Prisma.Decimal(1000)),
   calculateCashBalanceTx: vi.fn().mockResolvedValue(new Prisma.Decimal(1000)),
-  isDayFinalized: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../middleware/auth', () => ({
@@ -42,12 +41,11 @@ vi.mock('../middleware/auth', () => ({
   getSchoolScope: vi.fn().mockReturnValue('school-1'),
 }));
 
-import { isDayFinalized, calculateCashBalanceTx } from '../services/bookingService';
+import { calculateCashBalanceTx } from '../services/bookingService';
 
 describe('bookings route - storno validation logic', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(isDayFinalized).mockResolvedValue(false);
     vi.mocked(calculateCashBalanceTx).mockResolvedValue(new Prisma.Decimal(1000));
   });
 
@@ -124,14 +122,6 @@ describe('bookings route - storno validation logic', () => {
       // Route should return 409: "Festgeschriebene Buchungen können nicht storniert werden"
     });
 
-    it('should reject storno when today is already finalized', async () => {
-      vi.mocked(isDayFinalized).mockResolvedValue(true);
-
-      const finalized = await isDayFinalized('school-1', new Date());
-      expect(finalized).toBe(true);
-      // Route should return 409: "Tagesabschluss bereits durchgeführt"
-    });
-
     it('should reverse debit/credit correctly: S -> H', () => {
       const originalDebitCredit = 'S';
       const reversed = originalDebitCredit === 'S' ? 'H' : 'S';
@@ -189,14 +179,6 @@ describe('bookings route - storno validation logic', () => {
 
       expect(newBalance.isNegative()).toBe(false);
       expect(newBalance.isZero()).toBe(true);
-    });
-
-    it('should reject booking when day is already finalized', async () => {
-      vi.mocked(isDayFinalized).mockResolvedValue(true);
-
-      const finalized = await isDayFinalized('school-1', new Date());
-      expect(finalized).toBe(true);
-      // Route should return 409
     });
   });
 
