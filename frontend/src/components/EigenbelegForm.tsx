@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../api/client';
 import { ReceiptUpload } from './ReceiptUpload';
 
@@ -32,6 +32,11 @@ interface Props {
   costCenters: EigenbelegCostCenter[];
   dateMode: 'TODAY' | 'EMPTY';
   onCancel: () => void;
+  /**
+   * true, solange die Buchung unterwegs ist. Die Maske darf dann nicht
+   * geschlossen werden: die Bestätigung ginge verloren und das Journal bliebe alt.
+   */
+  onBookingChange: (booking: boolean) => void;
   onBooked: (result: EigenbelegResult) => void;
 }
 
@@ -123,8 +128,16 @@ function suggestDescription(labels: string[]): string {
   return text;
 }
 
+/**
+ * Enter in einem Eingabefeld bucht nicht. Ein Eigenbeleg lässt sich nicht
+ * zurücknehmen — gebucht wird nur über die Schaltfläche.
+ */
+function keepEnterFromBooking(e: React.KeyboardEvent<HTMLFormElement>) {
+  if (e.key === 'Enter' && e.target instanceof HTMLInputElement) e.preventDefault();
+}
+
 export function EigenbelegForm({
-  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode, onCancel, onBooked,
+  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode, onCancel, onBookingChange, onBooked,
 }: Props) {
   const [debitCredit, setDebitCredit] = useState<'S' | 'H'>('S');
   const [bookingDate, setBookingDate] = useState(dateMode === 'TODAY' ? getTodayString() : '');
@@ -169,6 +182,13 @@ export function EigenbelegForm({
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  // Trifft die Vorschau erst ein, wenn die Maske schon zu ist, nimmt sie niemand mehr entgegen.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   const changeKind = (kind: 'S' | 'H') => {
     setDebitCredit(kind);
     setReasonIndex(0);
@@ -195,7 +215,9 @@ export function EigenbelegForm({
       setError('Bitte mindestens eine Position mit Betrag erfassen.');
       return null;
     }
-    for (const [i, row] of filledRows.entries()) {
+    // Über alle Zeilen zählen, damit die Meldung die Zeile nennt, die auf dem Bildschirm steht.
+    for (const [i, row] of rows.entries()) {
+      if (isBlank(row)) continue;
       const name = row.label.trim() || `Position ${i + 1}`;
       if (row.label.trim() === '') {
         setError(`Position ${i + 1}: Bitte eine Bezeichnung eintragen.`);
@@ -242,7 +264,9 @@ export function EigenbelegForm({
     if (!payload) return;
     setBusy('preview');
     try {
-      setPreviewUrl(await api.blobUrl(`/eigenbelege/preview${schoolParam}`, payload));
+      const url = await api.blobUrl(`/eigenbelege/preview${schoolParam}`, payload);
+      if (mounted.current) setPreviewUrl(url);
+      else URL.revokeObjectURL(url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Die Vorschau konnte nicht erzeugt werden.');
     } finally {
@@ -255,6 +279,7 @@ export function EigenbelegForm({
     const payload = buildPayload();
     if (!payload) return;
     setBusy('book');
+    onBookingChange(true);
     try {
       const created = await api.post<EigenbelegResult>(`/eigenbelege${schoolParam}`, payload);
 
@@ -276,6 +301,7 @@ export function EigenbelegForm({
         ? 'Keine Antwort vom Server. Bitte die Seite neu laden und im Kassenbuch nachsehen, ob die Buchung angelegt wurde – erst dann noch einmal buchen.'
         : e instanceof Error ? e.message : 'Der Eigenbeleg konnte nicht gebucht werden.');
       setBusy(null);
+      onBookingChange(false);
     }
   };
 
@@ -290,7 +316,7 @@ export function EigenbelegForm({
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} onKeyDown={keepEnterFromBooking}>
         <div className="eb-group" style={{ marginTop: 0 }}>Angaben auf dem Beleg</div>
         <div className="grid-2">
           <div className="form-group">
@@ -432,7 +458,7 @@ export function EigenbelegForm({
         </div>
 
         <div className="modal-actions">
-          <button type="button" className="btn btn-outline" onClick={onCancel}>Abbrechen</button>
+          <button type="button" className="btn btn-outline" disabled={busy === 'book'} onClick={onCancel}>Abbrechen</button>
           <button type="button" className="btn btn-outline" disabled={busy !== null || issuerMissing}
             onClick={(e) => handlePreview(e.currentTarget.form)}>
             {busy === 'preview' ? 'Erzeuge...' : 'Vorschau'}

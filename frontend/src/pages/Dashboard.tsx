@@ -608,6 +608,9 @@ function NewBookingModal({
   const [mode, setMode] = useState<'single' | 'split' | 'eigenbeleg'>(initialMode);
   // Gesetzt, sobald ein Eigenbeleg gebucht ist — die Maske zeigt dann die Bestätigung
   const [eigenbelegDone, setEigenbelegDone] = useState<EigenbelegResult | null>(null);
+  // Solange ein Eigenbeleg gebucht wird, bleibt die Maske offen. Schließen bräche
+  // die Buchung nicht ab — es fehlten nur die Bestätigung und das neue Journal.
+  const [eigenbelegBooking, setEigenbelegBooking] = useState(false);
 
   // Shared fields
   const [amount, setAmount] = useState('');
@@ -734,21 +737,21 @@ function NewBookingModal({
   const modeToggle = (
     <div className="flex-gap flex-wrap mb-3">
       <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-outline'}`}
-        onClick={() => setMode('single')}>
+        disabled={eigenbelegBooking} onClick={() => setMode('single')}>
         Einfachbuchung
       </button>
       <button className={`btn btn-sm ${mode === 'split' ? 'btn-primary' : 'btn-outline'}`}
-        onClick={() => setMode('split')}>
+        disabled={eigenbelegBooking} onClick={() => setMode('split')}>
         Splittbuchung
       </button>
       <button className={`btn btn-sm ${mode === 'eigenbeleg' ? 'btn-primary' : 'btn-outline'}`}
-        onClick={() => setMode('eigenbeleg')}>
+        disabled={eigenbelegBooking} onClick={() => setMode('eigenbeleg')}>
         Eigenbeleg
       </button>
     </div>
   );
 
-  const wideModal = (content: React.ReactNode, onDismiss: () => void) => (
+  const wideModal = (content: React.ReactNode, onDismiss?: () => void) => (
     <div className="modal-overlay" onClick={onDismiss} role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
         {content}
@@ -776,10 +779,11 @@ function NewBookingModal({
           costCenters={costCenters}
           dateMode={dateMode}
           onCancel={onClose}
+          onBookingChange={setEigenbelegBooking}
           onBooked={setEigenbelegDone}
         />
       </>,
-      onClose,
+      eigenbelegBooking ? undefined : onClose,
     );
   }
 
