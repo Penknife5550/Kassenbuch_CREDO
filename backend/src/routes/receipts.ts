@@ -39,6 +39,7 @@ async function loadReceiptWithScope(req: Request, receiptId: string) {
     include: {
       booking: { select: { schoolId: true, isFinalized: true } },
       belegart: { select: { id: true, code: true, label: true } },
+      eigenbeleg: { select: { id: true } },
     },
   });
   if (!receipt) return { receipt: null, forbidden: false };
@@ -58,7 +59,10 @@ receiptsRouter.get('/booking/:bookingId', async (req: Request, res: Response) =>
 
     const list = await prisma.bookingReceipt.findMany({
       where: { bookingId, deletedAt: null },
-      include: { belegart: { select: { id: true, code: true, label: true } } },
+      include: {
+        belegart: { select: { id: true, code: true, label: true } },
+        eigenbeleg: { select: { id: true } },
+      },
       orderBy: { uploadedAt: 'asc' },
     });
 
@@ -71,6 +75,8 @@ receiptsRouter.get('/booking/:bookingId', async (req: Request, res: Response) =>
       sha256: r.sha256,
       uploadedAt: r.uploadedAt,
       belegart: r.belegart,
+      // Im Kassenbuch erzeugter Eigenbeleg — nicht einzeln loeschbar
+      generated: r.eigenbeleg !== null,
     })));
   } catch (err) {
     console.error('GET /receipts/booking/:bookingId error:', err);
@@ -283,6 +289,15 @@ receiptsRouter.delete('/:id', async (req: Request, res: Response) => {
     if (forbidden) { res.status(403).json({ error: 'Kein Zugriff' }); return; }
     if (!receipt || receipt.deletedAt) {
       res.status(404).json({ error: 'Beleg nicht gefunden' });
+      return;
+    }
+
+    // Ein erzeugter Eigenbeleg ist der Beleg der Buchung selbst. Er verschwindet
+    // nie einzeln — auch nicht fuer Admins und nicht vor dem Tagesabschluss.
+    if (receipt.eigenbeleg) {
+      res.status(409).json({
+        error: 'Dieser Eigenbeleg gehört fest zur Buchung. Bitte stornieren Sie die Buchung, wenn er falsch ist.',
+      });
       return;
     }
 

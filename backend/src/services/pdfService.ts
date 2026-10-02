@@ -23,12 +23,35 @@ interface PdfOptions {
   openingBalance: string;
 }
 
-const CREDO_PRIMARY = '#575756';
+export const CREDO_PRIMARY = '#575756';
 const CREDO_GRAY = '#9D9D9C';
 const CREDO_YELLOW = '#FFD500';
 const CREDO_GREEN = '#6BAA24';
-const CREDO_RED = '#E2001A';
+export const CREDO_RED = '#E2001A';
 const CREDO_BLUE = '#009FE3';
+
+/**
+ * CREDO-Linie und Fusszeile am unteren Seitenrand — fuer alle PDFs des Kassenbuchs.
+ *
+ * Der Text wird bewusst ohne `width` gesetzt und von Hand zentriert: steht er
+ * unterhalb des unteren Seitenrands, beginnt pdfkit bei Text mit `width` sonst
+ * eine neue Seite, auf der dann nur die Fusszeile steht.
+ */
+export function drawCredoFooter(doc: PDFKit.PDFDocument, marginLeft: number, contentWidth: number): void {
+  const footerY = doc.page.height - 30;
+  const lineY = footerY - 8;
+  const partWidth = contentWidth / 7;
+
+  doc.rect(marginLeft, lineY, partWidth * 4, 3).fill(CREDO_GRAY);
+  doc.rect(marginLeft + partWidth * 4, lineY, partWidth, 3).fill(CREDO_YELLOW);
+  doc.rect(marginLeft + partWidth * 5, lineY, partWidth, 3).fill(CREDO_GREEN);
+  doc.rect(marginLeft + partWidth * 6, lineY, partWidth, 3).fill(CREDO_RED);
+
+  const text = 'CREDO Verwaltung – Kassenbuch';
+  doc.font('Helvetica').fontSize(6).fillColor(CREDO_GRAY);
+  const textX = marginLeft + (contentWidth - doc.widthOfString(text)) / 2;
+  doc.text(text, textX, footerY, { lineBreak: false });
+}
 
 const COL_X = [28, 68, 118, 260, 315, 370, 400, 468, 536];
 const COL_WIDTHS = [38, 48, 140, 52, 52, 28, 66, 66, 66];
@@ -91,23 +114,9 @@ export function generateKassenbuchPdf(options: PdfOptions) {
   };
 
   const drawFooter = () => {
-    const pageWidth = doc.page.width;
     const marginLeft = doc.page.margins.left;
-    const contentWidth = pageWidth - marginLeft - doc.page.margins.right;
-    const footerY = doc.page.height - 30;
-
-    // CREDO line
-    const lineY = footerY - 8;
-    const totalParts = 7;
-    const partWidth = contentWidth / totalParts;
-
-    doc.rect(marginLeft, lineY, partWidth * 4, 3).fill(CREDO_GRAY);
-    doc.rect(marginLeft + partWidth * 4, lineY, partWidth, 3).fill(CREDO_YELLOW);
-    doc.rect(marginLeft + partWidth * 5, lineY, partWidth, 3).fill(CREDO_GREEN);
-    doc.rect(marginLeft + partWidth * 6, lineY, partWidth, 3).fill(CREDO_RED);
-
-    doc.font('Helvetica').fontSize(6).fillColor(CREDO_GRAY);
-    doc.text('CREDO Verwaltung – Kassenbuch', marginLeft, footerY, { width: contentWidth, align: 'center' });
+    const contentWidth = doc.page.width - marginLeft - doc.page.margins.right;
+    drawCredoFooter(doc, marginLeft, contentWidth);
   };
 
   // First page
@@ -211,7 +220,9 @@ export function generateKassenbuchPdf(options: PdfOptions) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Eigenbeleg PDF
+// Kassensturz-Beleg (Tagesabschluss mit Zaehlprotokoll)
+// Nicht zu verwechseln mit dem Eigenbeleg einer Buchung — der entsteht in
+// eigenbelegPdf.ts.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DENOMINATION_DEFS = [
@@ -232,7 +243,7 @@ const DENOMINATION_DEFS = [
   { key: 'c1',   label:   '0,01 €', centValue:     1 },
 ];
 
-export interface EigenbelegOptions {
+export interface KassensturzOptions {
   schoolName: string;
   schoolCode: string;
   closingDate: Date;
@@ -252,7 +263,7 @@ export interface EigenbelegOptions {
   closedByName: string;
 }
 
-export function generateEigenbelegPdf(options: EigenbelegOptions) {
+export function generateKassensturzPdf(options: KassensturzOptions) {
   const {
     schoolName, schoolCode, closingDate, expectedBalance,
     actualBalance, difference, comment, denominationCounts,
@@ -418,22 +429,13 @@ export function generateEigenbelegPdf(options: EigenbelegOptions) {
   doc.moveTo(marginLeft + contentWidth - 160, signY + 40).lineTo(marginLeft + contentWidth, signY + 40).lineWidth(0.5).strokeColor(CREDO_GRAY).stroke();
 
   // ── Footer ─────────────────────────────────────────────────────────────────
-  const footerY = doc.page.height - 30;
-  const lineY = footerY - 8;
-  const totalParts = 7;
-  const partWidth = contentWidth / totalParts;
-  doc.rect(marginLeft, lineY, partWidth * 4, 3).fill(CREDO_GRAY);
-  doc.rect(marginLeft + partWidth * 4, lineY, partWidth, 3).fill(CREDO_YELLOW);
-  doc.rect(marginLeft + partWidth * 5, lineY, partWidth, 3).fill(CREDO_GREEN);
-  doc.rect(marginLeft + partWidth * 6, lineY, partWidth, 3).fill(CREDO_RED);
-  doc.font('Helvetica').fontSize(6).fillColor(CREDO_GRAY);
-  doc.text('CREDO Verwaltung – Kassenbuch', marginLeft, footerY, { width: contentWidth, align: 'center' });
+  drawCredoFooter(doc, marginLeft, contentWidth);
 
   doc.end();
   return doc;
 }
 
-function formatDateDE(date: Date): string {
+export function formatDateDE(date: Date): string {
   const d = date.getDate().toString().padStart(2, '0');
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
   return `${d}.${m}.${date.getFullYear()}`;

@@ -12,12 +12,14 @@ export interface ReceiptUploadProps {
   hint?: string;
   /** Wenn true: Komponente kompakter, ohne große Drop-Zone (für Popover) */
   compact?: boolean;
+  /** Beschriftung des Knopfs in der kompakten Form */
+  addLabel?: string;
 }
 
 const ACCEPT = 'application/pdf,image/jpeg,image/png';
 const ACCEPTED_EXT = ['pdf', 'jpg', 'jpeg', 'png'];
 
-function formatBytes(b: number): string {
+export function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
@@ -36,6 +38,7 @@ export function ReceiptUpload({
   onChange,
   hint,
   compact = false,
+  addLabel = '+ Beleg hinzufügen',
 }: ReceiptUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -88,7 +91,7 @@ export function ReceiptUpload({
           className="btn btn-sm btn-outline"
           onClick={() => inputRef.current?.click()}
         >
-          + Beleg hinzufügen
+          {addLabel}
         </button>
         <input
           ref={inputRef}

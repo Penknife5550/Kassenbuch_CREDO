@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../prismaClient';
 
-type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+export type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 export async function getNextReceiptNumber(tx: TxClient, schoolId: string): Promise<number> {
   const seq = await tx.receiptSequence.update({
@@ -51,4 +51,155 @@ export async function isDayFinalized(schoolId: string, date: Date): Promise<bool
     },
   });
   return !!closing;
+}
+
+export type BookingDateResult =
+  | { ok: true; date: Date }
+  | { ok: false; error: string };
+
+/**
+ * Buchungsdatum aus der Anfrage. Fehlt es, gilt heute; ein Datum in der
+ * Zukunft wird abgewiesen.
+ */
+export function resolveBookingDate(raw?: string): BookingDateResult {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (!raw) return { ok: true, date: today };
+
+  const date = new Date(raw);
+  date.setHours(0, 0, 0, 0);
+  if (isNaN(date.getTime())) return { ok: false, error: 'Ungültiges Buchungsdatum' };
+  if (date > today) return { ok: false, error: 'Buchungsdatum darf nicht in der Zukunft liegen.' };
+  return { ok: true, date };
+}
+
+export interface NewBooking {
+  schoolId: string;
+  bookingDate: Date;
+  amount: Prisma.Decimal;
+  debitCredit: 'S' | 'H';
+  accountId: string;
+  counterAccountId: string;
+  costCenterId?: string;
+  description: string;
+  taxKey?: string;
+  createdById: string;
+}
+
+/**
+ * Legt eine Einzelbuchung in einer laufenden Transaktion an: Saldo-Pruefung bei
+ * Ausgaben, naechste Belegnummer, Buchung. Die Transaktion muss Serializable
+ * laufen, sonst ist die Saldo-Pruefung gegen parallele Buchungen nicht dicht.
+ *
+ * Wirft `BALANCE:<Meldung>`, wenn die Ausgabe den Kassenbestand ins Minus
+ * braechte — bookingErrorToResponse macht daraus die 409-Antwort.
+ */
+export async function createBookingInTx(tx: TxClient, input: NewBooking) {
+  if (input.debitCredit === 'H') {
+    const currentBalance = await calculateCashBalanceTx(tx, input.schoolId);
+    const newBalance = currentBalance.sub(input.amount);
+    if (newBalance.isNegative()) {
+      throw new Error(`BALANCE:Kassenbestand darf nicht negativ werden. Aktueller Bestand: ${currentBalance.toString()} EUR`);
+    }
+  }
+
+  const receiptNumber = await getNextReceiptNumber(tx, input.schoolId);
+
+  return tx.booking.create({
+    data: {
+      schoolId: input.schoolId,
+      receiptNumber,
+      bookingDate: input.bookingDate,
+      amount: input.amount,
+      debitCredit: input.debitCredit,
+      accountId: input.accountId,
+      counterAccountId: input.counterAccountId,
+      costCenterId: input.costCenterId,
+      description: input.description,
+      taxKey: input.taxKey,
+      createdById: input.createdById,
+    },
+    include: {
+      account: { select: { accountNumber: true, name: true } },
+      counterAccount: { select: { accountNumber: true, name: true } },
+      costCenter: { select: { code: true, name: true } },
+      createdBy: { select: { displayName: true } },
+    },
+  });
+}
+
+/**
+ * Meldung fuer eine Kostenstelle, die es beim Buchen nicht mehr gibt.
+ *
+ * Das Zod-Schema prueft nur die UUID-Form. Ein Browser-Tab, der vor einer
+ * Deaktivierung geoeffnet wurde, kennt die Kostenstelle aber weiterhin — ohne
+ * Pruefung koennte er darauf buchen und sie damit zurueck in Journal,
+ * DATEV-KOST1 und DMS-Trennseite holen. Gilt nur fuer NEUE Buchungen; ein
+ * Storno uebernimmt die Kostenstelle des Originals und wird nicht geprueft.
+ */
+export const COST_CENTER_GONE = 'Diese Kostenstelle ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
+
+export const ACCOUNT_GONE = 'Ein ausgewähltes Konto ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
+
+/**
+ * Faengt den Sekundenbruchteil zwischen Pruefung und INSERT ab: verschwindet
+ * eine Kostenstelle oder ein Konto genau dann, weist die Datenbank das INSERT
+ * per Fremdschluessel ab (P2003). Ohne diesen Zweig saehe der Anwender
+ * ausgerechnet dort einen nichtssagenden 500er.
+ */
+function foreignKeyMessage(err: unknown): string | null {
+  if (!err || typeof err !== 'object' || !('code' in err) || err.code !== 'P2003') return null;
+  const field = String((err as { meta?: { field_name?: unknown } }).meta?.field_name ?? '');
+  return field.includes('cost_center') ? COST_CENTER_GONE : ACCOUNT_GONE;
+}
+
+export const WRITE_CONFLICT = 'Gleichzeitig wurde eine andere Buchung gespeichert. Bitte noch einmal buchen.';
+
+/**
+ * P2034: zwei Buchungen derselben Schule trafen im selben Moment ein. Beide
+ * greifen nach der naechsten Belegnummer; PostgreSQL bricht bei Serializable
+ * eine der beiden Transaktionen ab, ohne dass sie etwas geschrieben hat.
+ */
+export function isWriteConflict(err: unknown): boolean {
+  return !!err && typeof err === 'object' && 'code' in err && err.code === 'P2034';
+}
+
+const WRITE_CONFLICT_ATTEMPTS = 5;
+
+/**
+ * Wiederholt eine Serializable-Transaktion, die an einer parallelen Buchung
+ * gescheitert ist. Der neue Versuch sieht den Stand der anderen Buchung und
+ * gelingt; die kurze, zufaellige Pause entzerrt mehrere Wartende.
+ *
+ * Nur fuer Transaktionen, die alle ihre Pruefungen selbst enthalten. Eine
+ * Pruefung VOR der Transaktion ("schon storniert?") liefe beim zweiten Versuch
+ * nicht noch einmal.
+ */
+export async function retryOnWriteConflict<T>(
+  run: () => Promise<T>,
+  beforeRetry: () => Promise<unknown>,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isWriteConflict(err) || attempt >= WRITE_CONFLICT_ATTEMPTS) throw err;
+      await beforeRetry();
+      await new Promise((resolve) => setTimeout(resolve, 20 * attempt + Math.random() * 40));
+    }
+  }
+}
+
+/**
+ * Uebersetzt die erwartbaren Fehler einer Buchungs-Transaktion in Status und
+ * Meldung. null heisst: unbekannter Fehler, der Aufrufer antwortet mit 500.
+ */
+export function bookingErrorToResponse(err: unknown): { status: number; error: string } | null {
+  const fkMessage = foreignKeyMessage(err);
+  if (fkMessage) return { status: 400, error: fkMessage };
+  if (err instanceof Error && err.message.startsWith('BALANCE:')) {
+    return { status: 409, error: err.message.slice(8) };
+  }
+  if (isWriteConflict(err)) return { status: 409, error: WRITE_CONFLICT };
+  return null;
 }

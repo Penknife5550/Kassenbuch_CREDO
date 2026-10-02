@@ -5,7 +5,7 @@ import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import { calculateCashBalance, getNextReceiptNumber } from '../services/bookingService';
-import { generateEigenbelegPdf } from '../services/pdfService';
+import { generateKassensturzPdf } from '../services/pdfService';
 import { getClientIp } from '../utils/request';
 
 export const dailyClosingRouter = Router();
@@ -104,7 +104,7 @@ dailyClosingRouter.get('/eigenbeleg/:id', async (req: Request, res: Response) =>
       return;
     }
 
-    const pdf = generateEigenbelegPdf({
+    const pdf = generateKassensturzPdf({
       schoolName: closing.school.name,
       schoolCode: closing.school.code,
       closingDate: closing.closingDate,

@@ -192,6 +192,7 @@ model Booking {
   stornoBookings Booking[]     @relation("BookingStorno")
   dailyClosingCorrection DailyClosing? @relation("DailyClosingCorrection")
   receipts       BookingReceipt[]
+  eigenbeleg     Eigenbeleg?
 
   @@index([schoolId, bookingDate])
   @@index([schoolId, isFinalized])
@@ -257,10 +258,45 @@ model BookingReceipt {
   booking    Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   belegart   Belegart? @relation(fields: [belegartId], references: [id])
   uploadedBy User      @relation("ReceiptUploader", fields: [uploadedById], references: [id])
+  eigenbeleg Eigenbeleg?
 
   @@index([bookingId])
   @@index([sha256])
   @@map("booking_receipts")
+}
+
+/// Im Kassenbuch erzeugter Eigenbeleg. Haelt nur, was nicht in der Buchung
+/// steht — Betrag, Datum, Konten und Ersteller liefert die Buchung. Das PDF
+/// selbst ist ein gewoehnlicher BookingReceipt und laeuft dadurch unveraendert
+/// durch Vorschau, Download und DMS-Export.
+model Eigenbeleg {
+  id           String   @id @default(uuid())
+  bookingId    String   @unique @map("booking_id")
+  receiptId    String   @unique @map("receipt_id")
+  counterparty String
+  reason       String
+  positions    Json
+  payeeSigns   Boolean  @default(false) @map("payee_signs")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Restrict: ein erzeugter Beleg darf weder mit der Buchung noch mit der
+  // Belegdatei still verschwinden.
+  booking Booking        @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  receipt BookingReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+
+  @@map("eigenbelege")
+}
+
+/// Aussteller der Belege dieser Installation (Rechtstraeger). Genau eine Zeile
+/// mit id = "default". Gilt fuer alle Mandanten; deren Name steht auf dem Beleg
+/// unter dem Aussteller.
+model ReceiptIssuer {
+  id        String   @id
+  name      String
+  address   String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("receipt_issuer")
 }
 
 model ReceiptSequence {

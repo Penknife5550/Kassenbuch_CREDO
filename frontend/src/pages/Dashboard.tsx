@@ -14,6 +14,8 @@ import {
 } from './dashboard-columns';
 import { ReceiptUpload } from '../components/ReceiptUpload';
 import { ReceiptPopover, BelegartDto, ReceiptDto } from '../components/ReceiptPopover';
+import { EigenbelegForm, EigenbelegResult } from '../components/EigenbelegForm';
+import { EigenbelegDone } from '../components/EigenbelegDone';
 
 interface Account {
   id: string;
@@ -102,7 +104,8 @@ export function Dashboard() {
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [page, setPage] = useState(1);
   const [error, setError] = useState('');
-  const [showNewBooking, setShowNewBooking] = useState(false);
+  // null = Maske geschlossen, sonst der Reiter, mit dem sie sich öffnet
+  const [newBookingMode, setNewBookingMode] = useState<'single' | 'eigenbeleg' | null>(null);
   const [showPdfExport, setShowPdfExport] = useState(false);
   const [showAnfangsbestand, setShowAnfangsbestand] = useState(false);
   const [receiptCounts, setReceiptCounts] = useState<Record<string, number>>({});
@@ -233,7 +236,10 @@ export function Dashboard() {
                   Anfangsbestand erfassen
                 </button>
               )}
-              <button className="btn btn-primary" onClick={() => setShowNewBooking(true)}>
+              <button className="btn btn-outline" onClick={() => setNewBookingMode('eigenbeleg')}>
+                Eigenbeleg
+              </button>
+              <button className="btn btn-primary" onClick={() => setNewBookingMode('single')}>
                 + Neue Buchung
               </button>
             </>
@@ -327,7 +333,7 @@ export function Dashboard() {
       {data && data.bookings.length === 0 && selectedSchool && !showAnfangsbestand && (
         <div className="card text-center" style={{ padding: '3rem' }}>
           <p className="text-light">Noch keine Buchungen vorhanden.</p>
-          <button className="btn btn-primary mt-2" onClick={() => setShowNewBooking(true)}>
+          <button className="btn btn-primary mt-2" onClick={() => setNewBookingMode('single')}>
             Erste Buchung erfassen
           </button>
         </div>
@@ -355,8 +361,9 @@ export function Dashboard() {
       )}
 
       {/* New Booking Modal */}
-      {showNewBooking && (
+      {newBookingMode && (
         <NewBookingModal
+          initialMode={newBookingMode}
           schoolId={selectedSchool}
           isAdmin={user?.role === 'ADMIN'}
           kasseAccounts={kasseAccounts}
@@ -366,9 +373,9 @@ export function Dashboard() {
           belegarten={belegarten}
           belegartDefaultId={selectedSchoolObj?.belegartDefaultId ?? null}
           belegartRequired={selectedSchoolObj?.belegartRequired ?? false}
-          onClose={() => setShowNewBooking(false)}
+          onClose={() => setNewBookingMode(null)}
           onCreated={(opts) => {
-            setShowNewBooking(false);
+            setNewBookingMode(null);
             loadBookings();
             if (opts.noReceiptUploaded) {
               setToast('Hinweis: Du hast keinen Beleg angehängt. Du kannst das später nachholen.');
@@ -588,16 +595,19 @@ function emptySplitLine(): SplitLine {
 }
 
 function NewBookingModal({
-  schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode,
+  initialMode, schoolId, isAdmin, kasseAccounts, gegenAccounts, costCenters, dateMode,
   belegarten, belegartDefaultId, belegartRequired,
   onClose, onCreated,
 }: {
+  initialMode: 'single' | 'eigenbeleg';
   schoolId: string; isAdmin: boolean; kasseAccounts: Account[]; gegenAccounts: Account[];
   costCenters: CostCenter[]; dateMode: 'TODAY' | 'EMPTY';
   belegarten: BelegartDto[]; belegartDefaultId: string | null; belegartRequired: boolean;
   onClose: () => void; onCreated: (opts: { noReceiptUploaded: boolean }) => void;
 }) {
-  const [mode, setMode] = useState<'single' | 'split'>('single');
+  const [mode, setMode] = useState<'single' | 'split' | 'eigenbeleg'>(initialMode);
+  // Gesetzt, sobald ein Eigenbeleg gebucht ist — die Maske zeigt dann die Bestätigung
+  const [eigenbelegDone, setEigenbelegDone] = useState<EigenbelegResult | null>(null);
 
   // Shared fields
   const [amount, setAmount] = useState('');
@@ -720,22 +730,65 @@ function NewBookingModal({
     } finally { setLoading(false); }
   };
 
+  // flex-wrap: mit dem dritten Reiter passen die Knöpfe auf schmalen Bildschirmen nicht mehr in eine Zeile
+  const modeToggle = (
+    <div className="flex-gap flex-wrap mb-3">
+      <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-outline'}`}
+        onClick={() => setMode('single')}>
+        Einfachbuchung
+      </button>
+      <button className={`btn btn-sm ${mode === 'split' ? 'btn-primary' : 'btn-outline'}`}
+        onClick={() => setMode('split')}>
+        Splittbuchung
+      </button>
+      <button className={`btn btn-sm ${mode === 'eigenbeleg' ? 'btn-primary' : 'btn-outline'}`}
+        onClick={() => setMode('eigenbeleg')}>
+        Eigenbeleg
+      </button>
+    </div>
+  );
+
+  const wideModal = (content: React.ReactNode, onDismiss: () => void) => (
+    <div className="modal-overlay" onClick={onDismiss} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
+        {content}
+      </div>
+    </div>
+  );
+
+  // Der Eigenbeleg ist gebucht: egal wie die Maske geschlossen wird, das
+  // Journal muss neu laden.
+  if (eigenbelegDone) {
+    const finish = () => onCreated({ noReceiptUploaded: false });
+    return wideModal(<EigenbelegDone result={eigenbelegDone} onClose={finish} />, finish);
+  }
+
+  if (mode === 'eigenbeleg') {
+    return wideModal(
+      <>
+        <h2 id="modal-title">Neue Buchung</h2>
+        {modeToggle}
+        <EigenbelegForm
+          schoolId={schoolId}
+          isAdmin={isAdmin}
+          kasseAccounts={kasseAccounts}
+          gegenAccounts={gegenAccounts}
+          costCenters={costCenters}
+          dateMode={dateMode}
+          onCancel={onClose}
+          onBooked={setEigenbelegDone}
+        />
+      </>,
+      onClose,
+    );
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div className="modal" onClick={(e) => e.stopPropagation()} style={mode === 'split' ? { maxWidth: '720px' } : undefined}>
         <h2 id="modal-title">Neue Buchung</h2>
 
-        {/* Mode Toggle */}
-        <div className="flex-gap mb-3">
-          <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setMode('single')}>
-            Einfachbuchung
-          </button>
-          <button className={`btn btn-sm ${mode === 'split' ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setMode('split')}>
-            Splittbuchung
-          </button>
-        </div>
+        {modeToggle}
 
         {error && <div className="alert alert-error" role="alert">{error}</div>}
 

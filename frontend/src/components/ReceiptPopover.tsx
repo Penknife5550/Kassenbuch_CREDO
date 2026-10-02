@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { printPdf } from '../utils/printPdf';
 import { ReceiptUpload } from './ReceiptUpload';
 
 export interface ReceiptDto {
@@ -11,6 +12,8 @@ export interface ReceiptDto {
   sha256: string;
   uploadedAt: string;
   belegart?: { id: string; code: string; label: string } | null;
+  /** Im Kassenbuch erzeugter Eigenbeleg — gehört fest zur Buchung und ist nicht einzeln löschbar */
+  generated?: boolean;
 }
 
 export interface BelegartDto {
@@ -94,6 +97,11 @@ export function ReceiptPopover({
   const download = (r: ReceiptDto) =>
     api.download(`/receipts/${r.id}/download`, r.originalName).catch(e => setError(e.message));
 
+  const print = (r: ReceiptDto) =>
+    api.blobUrl(`/receipts/${r.id}/preview`)
+      .then(printPdf)
+      .catch(e => setError(e instanceof Error ? e.message : 'Drucken fehlgeschlagen'));
+
   const remove = async (r: ReceiptDto) => {
     if (!confirm(`Beleg "${r.originalName}" wirklich löschen?`)) return;
     try {
@@ -169,11 +177,15 @@ export function ReceiptPopover({
                     {formatBytes(r.sizeBytes)}
                     {r.belegart && <> · {r.belegart.label}</>}
                     {' · '}{new Date(r.uploadedAt).toLocaleString('de-DE')}
+                    {r.generated && <> · <span className="badge badge-admin">im Kassenbuch erstellt</span></>}
                   </div>
                 </div>
                 <button className="btn btn-sm btn-outline" onClick={() => openPreview(r)}>Vorschau</button>
+                {r.generated && (
+                  <button className="btn btn-sm btn-outline" onClick={() => print(r)}>Drucken</button>
+                )}
                 <button className="btn btn-sm btn-outline" onClick={() => download(r)}>Download</button>
-                {canMutate && (
+                {canMutate && !r.generated && (
                   <button className="btn btn-sm btn-danger" onClick={() => remove(r)} aria-label="Löschen">
                     Löschen
                   </button>

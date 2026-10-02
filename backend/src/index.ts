@@ -15,6 +15,8 @@ import { belegartenRouter } from './routes/belegarten';
 import { receiptsRouter } from './routes/receipts';
 import { dmsMappingRouter } from './routes/dmsMapping';
 import { dmsExportRouter } from './routes/dmsExport';
+import { eigenbelegeRouter } from './routes/eigenbelege';
+import { receiptIssuerRouter } from './routes/receiptIssuer';
 import { backfillKontonr2Mapping } from './services/dmsMappingService';
 
 const app = express();
@@ -41,6 +43,8 @@ app.use('/api/belegarten', belegartenRouter);
 app.use('/api/receipts', receiptsRouter);
 app.use('/api/admin/dms-mapping', dmsMappingRouter);
 app.use('/api/bookings/dms-export', dmsExportRouter);
+app.use('/api/eigenbelege', eigenbelegeRouter);
+app.use('/api/receipt-issuer', receiptIssuerRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

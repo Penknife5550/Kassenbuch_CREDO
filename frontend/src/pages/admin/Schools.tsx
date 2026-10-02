@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../../api/client';
 import { BelegartenManager } from './BelegartenManager';
 import { DmsMappingEditor } from './DmsMappingEditor';
+import { ReceiptIssuerCard } from './ReceiptIssuerCard';
 
 interface KasseAccountRef {
   id: string;
@@ -203,6 +204,8 @@ export function Schools() {
           onClose={() => setDmsMappingFor(null)}
         />
       )}
+
+      <ReceiptIssuerCard />
 
       <div className="card">
         <div className="table-wrapper">

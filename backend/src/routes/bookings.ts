@@ -5,38 +5,16 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
-import { getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx, isDayFinalized } from '../services/bookingService';
+import {
+  getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx, isDayFinalized,
+  resolveBookingDate, createBookingInTx, bookingErrorToResponse, COST_CENTER_GONE,
+} from '../services/bookingService';
 import { checkCostCentersUsable } from '../services/costCenterService';
 import { generateKassenbuchPdf } from '../services/pdfService';
 import { getClientIp, getParam } from '../utils/request';
 
 export const bookingsRouter = Router();
 bookingsRouter.use(authenticate);
-
-/**
- * Meldung fuer eine Kostenstelle, die es beim Buchen nicht mehr gibt.
- *
- * Das Zod-Schema prueft nur die UUID-Form. Ein Browser-Tab, der vor einer
- * Deaktivierung geoeffnet wurde, kennt die Kostenstelle aber weiterhin — ohne
- * Pruefung koennte er darauf buchen und sie damit zurueck in Journal,
- * DATEV-KOST1 und DMS-Trennseite holen. Gilt nur fuer NEUE Buchungen; ein
- * Storno uebernimmt die Kostenstelle des Originals und wird nicht geprueft.
- */
-const COST_CENTER_GONE = 'Diese Kostenstelle ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
-
-/**
- * Faengt den Sekundenbruchteil zwischen Pruefung und INSERT ab: verschwindet
- * eine Kostenstelle oder ein Konto genau dann, weist die Datenbank das INSERT
- * per Fremdschluessel ab (P2003). Ohne diesen Zweig saehe der Anwender
- * ausgerechnet dort einen nichtssagenden 500er.
- */
-function foreignKeyMessage(err: unknown): string | null {
-  if (!err || typeof err !== 'object' || !('code' in err) || err.code !== 'P2003') return null;
-  const field = String((err as { meta?: { field_name?: unknown } }).meta?.field_name ?? '');
-  return field.includes('cost_center')
-    ? COST_CENTER_GONE
-    : 'Ein ausgewähltes Konto ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
-}
 
 bookingsRouter.get('/', async (req: Request, res: Response) => {
   try {
@@ -294,25 +272,12 @@ bookingsRouter.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // Determine booking date - use provided date or default to today
-    let bookingDate: Date;
-    if (parsed.data.bookingDate) {
-      bookingDate = new Date(parsed.data.bookingDate);
-      bookingDate.setHours(0, 0, 0, 0);
-      if (isNaN(bookingDate.getTime())) {
-        res.status(400).json({ error: 'Ungültiges Buchungsdatum' });
-        return;
-      }
-      if (bookingDate > today) {
-        res.status(400).json({ error: 'Buchungsdatum darf nicht in der Zukunft liegen.' });
-        return;
-      }
-    } else {
-      bookingDate = today;
+    const resolvedDate = resolveBookingDate(parsed.data.bookingDate);
+    if (!resolvedDate.ok) {
+      res.status(400).json({ error: resolvedDate.error });
+      return;
     }
+    const bookingDate = resolvedDate.date;
 
     const finalized = await isDayFinalized(schoolId, bookingDate);
     if (finalized) {
@@ -321,40 +286,18 @@ bookingsRouter.post('/', async (req: Request, res: Response) => {
     }
 
     // Atomic transaction: balance check + receipt number + booking creation
-    const booking = await prisma.$transaction(async (tx) => {
-      // Balance check inside transaction for consistency
-      if (parsed.data.debitCredit === 'H') {
-        const currentBalance = await calculateCashBalanceTx(tx, schoolId);
-        const newBalance = currentBalance.sub(new Prisma.Decimal(parsed.data.amount));
-        if (newBalance.isNegative()) {
-          throw new Error(`BALANCE:Kassenbestand darf nicht negativ werden. Aktueller Bestand: ${currentBalance.toString()} EUR`);
-        }
-      }
-
-      const receiptNumber = await getNextReceiptNumber(tx, schoolId);
-
-      return tx.booking.create({
-        data: {
-          schoolId,
-          receiptNumber,
-          bookingDate,
-          amount: new Prisma.Decimal(parsed.data.amount),
-          debitCredit: parsed.data.debitCredit,
-          accountId: parsed.data.accountId,
-          counterAccountId: parsed.data.counterAccountId,
-          costCenterId: parsed.data.costCenterId,
-          description: parsed.data.description,
-          taxKey: parsed.data.taxKey,
-          createdById: req.user!.userId,
-        },
-        include: {
-          account: { select: { accountNumber: true, name: true } },
-          counterAccount: { select: { accountNumber: true, name: true } },
-          costCenter: { select: { code: true, name: true } },
-          createdBy: { select: { displayName: true } },
-        },
-      });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    const booking = await prisma.$transaction((tx) => createBookingInTx(tx, {
+      schoolId,
+      bookingDate,
+      amount: new Prisma.Decimal(parsed.data.amount),
+      debitCredit: parsed.data.debitCredit,
+      accountId: parsed.data.accountId,
+      counterAccountId: parsed.data.counterAccountId,
+      costCenterId: parsed.data.costCenterId,
+      description: parsed.data.description,
+      taxKey: parsed.data.taxKey,
+      createdById: req.user!.userId,
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     // Audit log outside transaction (non-critical, best-effort)
     try {
@@ -377,13 +320,9 @@ bookingsRouter.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json(booking);
   } catch (err) {
-    const fkMessage = foreignKeyMessage(err);
-    if (fkMessage) {
-      res.status(400).json({ error: fkMessage });
-      return;
-    }
-    if (err instanceof Error && err.message.startsWith('BALANCE:')) {
-      res.status(409).json({ error: err.message.slice(8) });
+    const known = bookingErrorToResponse(err);
+    if (known) {
+      res.status(known.status).json({ error: known.error });
       return;
     }
     console.error('POST /bookings error:', err);
@@ -438,24 +377,12 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
       return;
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    let bookingDate: Date;
-    if (parsed.data.bookingDate) {
-      bookingDate = new Date(parsed.data.bookingDate);
-      bookingDate.setHours(0, 0, 0, 0);
-      if (isNaN(bookingDate.getTime())) {
-        res.status(400).json({ error: 'Ungültiges Buchungsdatum' });
-        return;
-      }
-      if (bookingDate > today) {
-        res.status(400).json({ error: 'Buchungsdatum darf nicht in der Zukunft liegen.' });
-        return;
-      }
-    } else {
-      bookingDate = today;
+    const resolvedDate = resolveBookingDate(parsed.data.bookingDate);
+    if (!resolvedDate.ok) {
+      res.status(400).json({ error: resolvedDate.error });
+      return;
     }
+    const bookingDate = resolvedDate.date;
 
     const finalized = await isDayFinalized(schoolId, bookingDate);
     if (finalized) {
@@ -527,13 +454,9 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
 
     res.status(201).json(bookings);
   } catch (err) {
-    const fkMessage = foreignKeyMessage(err);
-    if (fkMessage) {
-      res.status(400).json({ error: fkMessage });
-      return;
-    }
-    if (err instanceof Error && err.message.startsWith('BALANCE:')) {
-      res.status(409).json({ error: err.message.slice(8) });
+    const known = bookingErrorToResponse(err);
+    if (known) {
+      res.status(known.status).json({ error: known.error });
       return;
     }
     console.error('POST /bookings/split error:', err);
@@ -676,13 +599,9 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
     // Return single storno for simple bookings, array for splits
     res.status(201).json(originalsToStorno.length > 1 ? stornoBookings : stornoBookings[0]);
   } catch (err) {
-    const fkMessage = foreignKeyMessage(err);
-    if (fkMessage) {
-      res.status(400).json({ error: fkMessage });
-      return;
-    }
-    if (err instanceof Error && err.message.startsWith('BALANCE:')) {
-      res.status(409).json({ error: err.message.slice(8) });
+    const known = bookingErrorToResponse(err);
+    if (known) {
+      res.status(known.status).json({ error: known.error });
       return;
     }
     console.error('POST /bookings/:id/storno error:', err);

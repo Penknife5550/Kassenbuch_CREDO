@@ -12,6 +12,20 @@ export function getToken(): string | null {
   return token;
 }
 
+/**
+ * Fehlerantwort auf eine Anfrage. Am `status` erkennt der Aufrufer, ob das
+ * Kassenbuch selbst abgesagt hat oder ein Proxy davor (502–504) — im zweiten
+ * Fall ist offen, ob die Anfrage noch verarbeitet wurde.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -30,7 +44,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Fehler: ${res.status}`);
+    throw new ApiError(body.error || `Fehler: ${res.status}`, res.status);
   }
 
   if (res.status === 204) return undefined as T;
@@ -101,14 +115,26 @@ async function uploadFiles<T>(
 
 /**
  * Holt eine authentifizierte Ressource als Blob-URL (für <iframe> / <img>).
+ * Mit `body` wird per POST angefragt — so liefert der Server ein PDF zu
+ * Angaben, die noch nicht gespeichert sind (Entwurfs-Vorschau).
  * Caller muss URL.revokeObjectURL(url) aufrufen, wenn die URL nicht mehr gebraucht wird.
  */
-async function fetchBlobUrl(path: string): Promise<string> {
+async function fetchBlobUrl(path: string, body?: unknown): Promise<string> {
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { headers });
-  if (!res.ok) throw new Error(`Fehler: ${res.status}`);
+  const init: RequestInit = { headers };
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.method = 'POST';
+    init.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, init);
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    throw new Error(errorBody.error || `Fehler: ${res.status}`);
+  }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }

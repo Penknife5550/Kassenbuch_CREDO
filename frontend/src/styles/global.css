@@ -324,6 +324,104 @@ tr:hover td {
   margin-top: 1.5rem;
 }
 
+/* ── Eigenbeleg-Formular ── */
+.eb-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.75rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-light);
+}
+
+.eb-group::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.eb-positions {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.eb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.5rem 4.5rem 6rem 1.5rem;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.eb-row-head {
+  padding: 0.5rem 0.6rem;
+  border-top: none;
+  background: var(--color-secondary);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.eb-row .form-control {
+  padding: 0.4rem 0.55rem;
+}
+
+.eb-right {
+  text-align: right;
+}
+
+.eb-amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.eb-remove {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-error);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.eb-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.eb-sum {
+  font-size: 0.875rem;
+  color: var(--color-primary);
+}
+
+.eb-sum strong {
+  margin-left: 0.5rem;
+  font-size: 1.15rem;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+  .eb-row {
+    grid-template-columns: minmax(0, 1fr) 4.5rem 3.25rem 4.75rem 1.25rem;
+    gap: 0.35rem;
+  }
+}
+
 /* ── Accessibility ── */
 .sr-only {
   position: absolute;
