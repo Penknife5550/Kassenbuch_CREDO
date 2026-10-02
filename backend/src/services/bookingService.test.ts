@@ -22,6 +22,7 @@ import {
   isDayFinalized,
   resolveBookingDate,
   createBookingInTx,
+  assertCostCentersUsable,
   assertDayOpen,
   assertNotStornoed,
   bookingErrorToResponse,
@@ -191,12 +192,16 @@ describe('bookingService', () => {
       expect(result).toEqual({ ok: true, date: midnight(new Date()) });
     });
 
+    // Bewusst gegen den Kalendertag geprueft und nicht gegen dieselbe Rechnung
+    // wie in der Funktion: der Tag der Anfrage muss der gebuchte Tag sein.
     it('uebernimmt ein Datum in der Vergangenheit', () => {
       const result = resolveBookingDate('2024-03-15');
 
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.date).toEqual(midnight(new Date('2024-03-15')));
+      const { date } = result;
+      expect([date.getFullYear(), date.getMonth() + 1, date.getDate()]).toEqual([2024, 3, 15]);
+      expect([date.getHours(), date.getMinutes(), date.getSeconds()]).toEqual([0, 0, 0]);
     });
 
     it('weist ein Datum in der Zukunft ab', () => {
@@ -270,9 +275,9 @@ describe('bookingService', () => {
       expect(tx.booking.create).toHaveBeenCalled();
     });
 
-    // Der Tagesabschluss kann zwischen der Vorab-Pruefung der Route und der
-    // Buchung fertig werden. Die Pruefung in der Transaktion faengt das ab —
-    // auch beim Wiederholungsversuch nach einem Schreibkonflikt mit dem Abschluss.
+    // Der Tagesabschluss kann fertig werden, waehrend die Buchung unterwegs
+    // ist. Die Pruefung in der Transaktion faengt das ab — auch beim
+    // Wiederholungsversuch nach einem Schreibkonflikt mit dem Abschluss.
     it('bucht nicht in einen abgeschlossenen Tag und zieht dann keine Belegnummer', async () => {
       const tx = makeTx(250, { dayClosed: true });
 
@@ -319,6 +324,28 @@ describe('bookingService', () => {
       await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).rejects.toThrow(`CLOSED:${DAY_CLOSED}`);
       await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'), 'Tagesabschluss bereits durchgeführt'))
         .rejects.toThrow('CLOSED:Tagesabschluss bereits durchgeführt');
+    });
+  });
+
+  // Eine Splittbuchung hat je Zeile eine Kostenstelle; eine einzige
+  // deaktivierte genuegt, damit nichts gebucht wird.
+  describe('assertCostCentersUsable', () => {
+    const txWith = (found: Array<{ id: string; isActive: boolean }>) => ({
+      costCenter: { findMany: vi.fn().mockResolvedValue(found) },
+    });
+
+    it('laesst aktive Kostenstellen und Zeilen ohne Kostenstelle durch', async () => {
+      const tx = txWith([{ id: 'kst-1', isActive: true }, { id: 'kst-2', isActive: true }]);
+
+      await expect(assertCostCentersUsable(tx as any, ['kst-1', undefined, 'kst-2'])).resolves.toBeUndefined();
+    });
+
+    it('bricht ab, sobald eine der Kostenstellen deaktiviert oder verschwunden ist', async () => {
+      const deactivated = txWith([{ id: 'kst-1', isActive: true }, { id: 'kst-2', isActive: false }]);
+      const missing = txWith([{ id: 'kst-1', isActive: true }]);
+
+      await expect(assertCostCentersUsable(deactivated as any, ['kst-1', 'kst-2'])).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
+      await expect(assertCostCentersUsable(missing as any, ['kst-1', 'kst-2'])).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
     });
   });
 

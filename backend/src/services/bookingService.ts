@@ -61,12 +61,12 @@ export async function isDayFinalized(
 export const DAY_CLOSED = 'Tagesabschluss für dieses Datum bereits durchgeführt. Keine Buchungen möglich.';
 
 /**
- * Stellt IN der Transaktion sicher, dass der Tag nicht abgeschlossen ist. Die
- * Routen pruefen das vorab — ein Tagesabschluss kann aber zwischen jener
- * Pruefung und der Buchung fertig werden. Ohne diese Pruefung landete die
- * Buchung dann unfestgeschrieben im abgeschlossenen Tag, an Soll- und
- * Istbestand des Abschlusses vorbei. Ueberlappen sich Abschluss und Buchung,
- * bricht Serializable eine der beiden Transaktionen ab (P2034).
+ * Stellt IN der Transaktion sicher, dass der Tag nicht abgeschlossen ist. Eine
+ * Pruefung vor der Transaktion reicht nicht: der Tagesabschluss kann bis zur
+ * Buchung fertig werden, und die Buchung landete dann unfestgeschrieben im
+ * abgeschlossenen Tag, an Soll- und Istbestand des Abschlusses vorbei.
+ * Ueberlappen sich Abschluss und Buchung, bricht Serializable eine der beiden
+ * Transaktionen ab (P2034).
  *
  * Wirft `CLOSED:<Meldung>` — bookingErrorToResponse macht daraus die 409-Antwort.
  */
@@ -120,8 +120,7 @@ export interface NewBooking {
  * bookingErrorToResponse macht daraus die Antwort.
  */
 export async function createBookingInTx(tx: TxClient, input: NewBooking) {
-  const costCenters = await checkCostCentersUsable(tx, [input.costCenterId]);
-  if (!costCenters.ok) throw new Error(`GONE:${COST_CENTER_GONE}`);
+  await assertCostCentersUsable(tx, [input.costCenterId]);
   await assertDayOpen(tx, input.schoolId, input.bookingDate);
 
   if (input.debitCredit === 'H') {
@@ -182,6 +181,16 @@ export async function assertNotStornoed(tx: TxClient, bookingIds: string[], mess
  * Storno uebernimmt die Kostenstelle des Originals und wird nicht geprueft.
  */
 export const COST_CENTER_GONE = 'Diese Kostenstelle ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
+
+/**
+ * Stellt IN der Transaktion sicher, dass alle Kostenstellen existieren und
+ * aktiv sind. Wirft `GONE:<Meldung>` — bookingErrorToResponse macht daraus
+ * die 400-Antwort.
+ */
+export async function assertCostCentersUsable(tx: TxClient, ids: Array<string | null | undefined>): Promise<void> {
+  const check = await checkCostCentersUsable(tx, ids);
+  if (!check.ok) throw new Error(`GONE:${COST_CENTER_GONE}`);
+}
 
 export const ACCOUNT_GONE = 'Ein ausgewähltes Konto ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
 
