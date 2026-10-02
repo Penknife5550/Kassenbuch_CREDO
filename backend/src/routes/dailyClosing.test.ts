@@ -24,7 +24,10 @@ vi.mock('../services/auditService', () => ({
   logAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../services/bookingService', () => ({
+// Nur der Sollbestand vor der Transaktion ist gestellt (1000,00); die Pruefungen
+// in der Transaktion laufen echt.
+vi.mock('../services/bookingService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/bookingService')>()),
   calculateCashBalance: vi.fn().mockResolvedValue(new Prisma.Decimal(1000)),
 }));
 
@@ -204,6 +207,105 @@ describe('dailyClosing route - business logic', () => {
 
       expect(result).toEqual(mockClosing);
       expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+    });
+  });
+
+  // Ab hier laeuft der echte Handler der Route gegen eine gestellte Transaktion.
+  describe('POST /daily-closing', () => {
+    function makeTx(state: { balance: number; closed?: boolean }) {
+      return {
+        dailyClosing: {
+          findUnique: vi.fn().mockResolvedValue(state.closed ? { id: 'closing-1' } : null),
+          create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'closing-new', ...data })),
+        },
+        $queryRaw: vi.fn().mockResolvedValue([{ balance: new Prisma.Decimal(state.balance) }]),
+        receiptSequence: { update: vi.fn().mockResolvedValue({ lastNumber: 7 }) },
+        booking: {
+          create: vi.fn().mockResolvedValue({ id: 'correction-1' }),
+          updateMany: vi.fn().mockResolvedValue({ count: 3 }),
+        },
+      };
+    }
+
+    async function close(body: Record<string, unknown>) {
+      const { dailyClosingRouter } = await import('./dailyClosing');
+      const layer = (dailyClosingRouter as any).stack.find((l: any) => l.route?.path === '/' && l.route.methods.post);
+      const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+      await layer.route.stack[0].handle({ body, user: { userId: 'user-1' }, ip: '127.0.0.1' }, res);
+      return res;
+    }
+
+    const runIn = (tx: unknown) => mockPrisma.$transaction.mockImplementation((run: (tx: unknown) => unknown) => run(tx));
+
+    // Gezaehlt 1050,00 bei Soll 1000,00: 50,00 Ueberschuss
+    const withDifference = {
+      actualBalance: 1050,
+      comment: 'Fünfzig Euro zu viel in der Kasse',
+      createCorrectionBooking: true,
+      kasseAccountId: '11111111-1111-4111-8111-111111111111',
+      kassendifferenzAccountId: '22222222-2222-4222-8222-222222222222',
+    };
+
+    it('schliesst ab und bucht die Differenz, wenn der Sollbestand noch stimmt', async () => {
+      const tx = makeTx({ balance: 1000 });
+      runIn(tx);
+
+      const res = await close(withDifference);
+
+      expect(res.status).toHaveBeenCalledWith(201);
+      const correction = tx.booking.create.mock.calls[0][0].data;
+      expect(correction).toMatchObject({ debitCredit: 'S', receiptNumber: 7, isFinalized: true });
+      expect(correction.amount.toString()).toBe('50');
+      expect(tx.booking.updateMany).toHaveBeenCalled();
+      expect(tx.dailyClosing.create.mock.calls[0][0].data.expectedBalance.toString()).toBe('1000');
+    });
+
+    // Der Sollbestand wird vor der Transaktion gelesen. Kommt bis zu ihrem
+    // Beginn eine Buchung dazu, fehlte sie in Soll, Differenz und
+    // Korrekturbuchung — und wuerde trotzdem mit festgeschrieben.
+    it('schliesst nicht ab, wenn seit dem Lesen des Sollbestands gebucht wurde', async () => {
+      const tx = makeTx({ balance: 1050 });
+      runIn(tx);
+
+      const res = await close(withDifference);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Während des Tagesabschlusses wurde gebucht. Bitte die Seite neu laden und den Abschluss noch einmal durchführen.',
+      });
+      expect(tx.booking.create).not.toHaveBeenCalled();
+      expect(tx.booking.updateMany).not.toHaveBeenCalled();
+      expect(tx.dailyClosing.create).not.toHaveBeenCalled();
+    });
+
+    it('weist einen zweiten Abschluss desselben Tages ab, ohne etwas festzuschreiben', async () => {
+      const tx = makeTx({ balance: 1000, closed: true });
+      runIn(tx);
+
+      const res = await close({ actualBalance: 1000 });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Tagesabschluss für heute bereits durchgeführt' });
+      expect(tx.booking.updateMany).not.toHaveBeenCalled();
+      expect(tx.dailyClosing.create).not.toHaveBeenCalled();
+    });
+
+    it('meldet eine Buchung waehrend des Abschlusses als 409, nicht als Serverfehler', async () => {
+      mockPrisma.$transaction.mockRejectedValue({ code: 'P2034' });
+
+      const res = await close({ actualBalance: 1000 });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: expect.stringContaining('Während des Tagesabschlusses wurde gebucht') });
+    });
+
+    it('meldet zwei Abschluesse im selben Moment als schon abgeschlossen', async () => {
+      mockPrisma.$transaction.mockRejectedValue({ code: 'P2002' });
+
+      const res = await close({ actualBalance: 1000 });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Tagesabschluss für heute bereits durchgeführt' });
     });
   });
 });

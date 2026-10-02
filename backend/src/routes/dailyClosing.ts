@@ -4,7 +4,10 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
-import { calculateCashBalance, getNextReceiptNumber, isWriteConflict } from '../services/bookingService';
+import {
+  calculateCashBalance, calculateCashBalanceTx, getNextReceiptNumber,
+  assertDayOpen, isWriteConflict, bookingErrorToResponse,
+} from '../services/bookingService';
 import { generateKassensturzPdf } from '../services/pdfService';
 import { getClientIp } from '../utils/request';
 
@@ -165,6 +168,9 @@ const closeSchema = z.object({
   kassendifferenzAccountId: z.string().uuid().optional(),
 });
 
+const ALREADY_CLOSED = 'Tagesabschluss für heute bereits durchgeführt';
+const BOOKED_MEANWHILE = 'Während des Tagesabschlusses wurde gebucht. Bitte die Seite neu laden und den Abschluss noch einmal durchführen.';
+
 dailyClosingRouter.post('/', async (req: Request, res: Response) => {
   try {
     const parsed = closeSchema.safeParse(req.body);
@@ -181,14 +187,6 @@ dailyClosingRouter.post('/', async (req: Request, res: Response) => {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
-    const existing = await prisma.dailyClosing.findUnique({
-      where: { schoolId_closingDate: { schoolId, closingDate: today } },
-    });
-    if (existing) {
-      res.status(409).json({ error: 'Tagesabschluss für heute bereits durchgeführt' });
-      return;
-    }
 
     const expectedBalance = await calculateCashBalance(schoolId);
     const actualBalance = new Prisma.Decimal(parsed.data.actualBalance);
@@ -209,6 +207,14 @@ dailyClosingRouter.post('/', async (req: Request, res: Response) => {
     }
 
     const closing = await prisma.$transaction(async (tx) => {
+      await assertDayOpen(tx, schoolId, today, ALREADY_CLOSED);
+
+      // Der Sollbestand oben wurde vor der Transaktion gelesen. Eine Buchung,
+      // die seither gespeichert wurde, fehlte sonst in Soll, Differenz und
+      // Korrekturbuchung — und wuerde unten trotzdem mit festgeschrieben.
+      const balanceNow = await calculateCashBalanceTx(tx, schoolId);
+      if (!balanceNow.equals(expectedBalance)) throw new Error(`BALANCE:${BOOKED_MEANWHILE}`);
+
       let correctionBookingId: string | undefined;
 
       // Create correction booking if there is a difference
@@ -287,13 +293,21 @@ dailyClosingRouter.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json(closing);
   } catch (err) {
-    // Eine Buchung im selben Moment laesst die Serializable-Transaktion des
-    // Abschlusses abbrechen. Geschrieben ist dann nichts, der Sollbestand in
-    // der Maske ist aber veraltet.
+    // Eine Buchung waehrend des Abschlusses: PostgreSQL bricht die
+    // Serializable-Transaktion ab. Geschrieben ist dann nichts, der
+    // Sollbestand in der Maske ist aber veraltet.
     if (isWriteConflict(err)) {
-      res.status(409).json({
-        error: 'Während des Tagesabschlusses wurde gebucht. Bitte die Seite neu laden und den Abschluss noch einmal durchführen.',
-      });
+      res.status(409).json({ error: BOOKED_MEANWHILE });
+      return;
+    }
+    // Zwei Abschluesse im selben Moment: der Unique-Index auf (Mandant, Tag) laesst nur einen zu.
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+      res.status(409).json({ error: ALREADY_CLOSED });
+      return;
+    }
+    const known = bookingErrorToResponse(err);
+    if (known) {
+      res.status(known.status).json({ error: known.error });
       return;
     }
     console.error('POST /daily-closing error:', err);
