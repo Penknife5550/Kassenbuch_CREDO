@@ -26,9 +26,9 @@ export interface BelegartDto {
 
 interface Props {
   bookingId: string;
-  /** Falls Buchung festgeschrieben — User kann nicht hochladen/löschen */
+  /** Falls Buchung festgeschrieben — User kann noch anhängen, aber nicht mehr löschen */
   isFinalized: boolean;
-  /** Ist der aktuelle User Admin? (Admin darf trotz Finalized) */
+  /** Ist der aktuelle User Admin? (Admin darf trotz Finalized löschen) */
   isAdmin: boolean;
   /** Belegarten der Schule der Buchung (für nachträglichen Upload) */
   belegarten: BelegartDto[];
@@ -57,7 +57,8 @@ export function ReceiptPopover({
   const [addBelegartId, setAddBelegartId] = useState<string>(defaultBelegartId ?? '');
   const [uploading, setUploading] = useState(false);
 
-  const canMutate = !isFinalized || isAdmin;
+  // Anhängen geht immer, löschen nach dem Tagesabschluss nur noch für die Verwaltung
+  const canDelete = !isFinalized || isAdmin;
 
   useEffect(() => {
     api.get<ReceiptDto[]>(`/receipts/booking/${bookingId}`)
@@ -136,7 +137,7 @@ export function ReceiptPopover({
         <h2 id="receipt-pop-title" style={{ marginBottom: '0.5rem' }}>Belege</h2>
         {isFinalized && !isAdmin && (
           <div className="alert alert-warning" role="status" style={{ marginBottom: '0.75rem' }}>
-            Buchung ist festgeschrieben — Belege können nur noch angesehen werden.
+            Buchung ist festgeschrieben — Belege lassen sich noch anhängen, löschen kann sie nur die Verwaltung.
           </div>
         )}
         {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -146,11 +147,9 @@ export function ReceiptPopover({
         {receipts && receipts.length === 0 && !showAdd && (
           <div className="text-center" style={{ padding: '1rem 0' }}>
             <p className="text-light" style={{ marginBottom: '0.75rem' }}>Keine Belege vorhanden.</p>
-            {canMutate && (
-              <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-                + Beleg hochladen
-              </button>
-            )}
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+              + Beleg hochladen
+            </button>
           </div>
         )}
 
@@ -179,7 +178,7 @@ export function ReceiptPopover({
                   <button className="btn btn-sm btn-outline" onClick={() => print(r)}>Drucken</button>
                 )}
                 <button className="btn btn-sm btn-outline" onClick={() => download(r)}>Download</button>
-                {canMutate && !r.generated && (
+                {canDelete && !r.generated && (
                   <button className="btn btn-sm btn-danger" onClick={() => remove(r)} aria-label="Löschen">
                     Löschen
                   </button>
@@ -189,7 +188,7 @@ export function ReceiptPopover({
           </ul>
         )}
 
-        {receipts && receipts.length > 0 && !showAdd && canMutate && (
+        {receipts && receipts.length > 0 && !showAdd && (
           <div style={{ marginTop: '0.75rem' }}>
             <button className="btn btn-sm btn-outline" onClick={() => setShowAdd(true)}>
               + Beleg hinzufügen
@@ -197,7 +196,7 @@ export function ReceiptPopover({
           </div>
         )}
 
-        {showAdd && canMutate && (
+        {showAdd && (
           <div style={{ marginTop: '0.75rem', padding: '0.75rem', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
             <div className="form-group">
               <label htmlFor="addBelegart">Belegart{belegartRequired ? ' *' : ' (optional)'}</label>

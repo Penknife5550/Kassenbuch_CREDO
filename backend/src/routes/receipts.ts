@@ -23,7 +23,6 @@ async function loadBookingWithScope(req: Request, bookingId: string) {
       id: true,
       schoolId: true,
       bookingDate: true,
-      isFinalized: true,
     },
   });
   if (!booking) return { booking: null, forbidden: false };
@@ -141,13 +140,11 @@ receiptsRouter.post(
       if (forbidden) { res.status(403).json({ error: 'Kein Zugriff' }); return; }
       if (!booking) { res.status(404).json({ error: 'Buchung nicht gefunden' }); return; }
 
-      if (booking.isFinalized && req.user!.role !== 'ADMIN') {
-        res.status(409).json({
-          error: 'Buchung ist bereits durch Tagesabschluss festgeschrieben.',
-        });
-        return;
-      }
-
+      // Anhaengen geht auch nach dem Tagesabschluss: die Buchung selbst bleibt
+      // unveraendert, und der unterschriebene Ausdruck eines Eigenbelegs kommt
+      // oft erst am naechsten Tag aus dem Scanner. Wer wann angehaengt hat,
+      // steht am Beleg und im Audit-Log. Geloescht wird nach dem Abschluss
+      // weiterhin nur durch die Verwaltung (siehe DELETE).
       const files = (req.files as Express.Multer.File[] | undefined) ?? [];
       if (files.length === 0) {
         res.status(400).json({ error: 'Keine Datei hochgeladen' });

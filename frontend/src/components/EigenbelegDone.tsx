@@ -62,8 +62,8 @@ export function EigenbelegDone({ result, onClose }: Props) {
       </div>
       {result.payeeSigns && (
         <div className="alert alert-warning" role="status">
-          Bitte drucken, vom Empfänger unterschreiben lassen und den Scan über die Büroklammer an die Buchung hängen –
-          noch vor dem Tagesabschluss, danach kann das nur die Verwaltung.
+          Bitte drucken, vom Empfänger unterschreiben lassen und den Scan über die Büroklammer an die Buchung hängen.
+          Das geht auch noch nach dem Tagesabschluss.
         </div>
       )}
       {result.attachmentError && (
