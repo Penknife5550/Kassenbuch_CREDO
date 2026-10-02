@@ -373,10 +373,6 @@ tr:hover td {
   padding: 0.4rem 0.55rem;
 }
 
-.eb-right {
-  text-align: right;
-}
-
 .eb-amount {
   text-align: right;
   font-weight: 600;

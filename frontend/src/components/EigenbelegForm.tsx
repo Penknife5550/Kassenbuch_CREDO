@@ -329,9 +329,9 @@ export function EigenbelegForm({
         <div className="eb-positions" role="group" aria-labelledby="ebPositionsLabel">
           <div className="eb-row eb-row-head">
             <span>Bezeichnung</span>
-            <span className="eb-right">Einzelpreis</span>
-            <span className="eb-right">Anzahl</span>
-            <span className="eb-right">Betrag</span>
+            <span className="text-right">Einzelpreis</span>
+            <span className="text-right">Anzahl</span>
+            <span className="text-right">Betrag</span>
             <span />
           </div>
           {rows.map((row, index) => {
@@ -341,10 +341,10 @@ export function EigenbelegForm({
                 <input type="text" className="form-control" value={row.label} maxLength={MAX_LABEL_LENGTH}
                   onChange={(e) => updateRow(index, 'label', e.target.value)}
                   placeholder="z. B. Heft" aria-label={`Bezeichnung Position ${index + 1}`} />
-                <input type="text" inputMode="decimal" className="form-control eb-right" value={row.unitPrice}
+                <input type="text" inputMode="decimal" className="form-control text-right" value={row.unitPrice}
                   onChange={(e) => updateRow(index, 'unitPrice', e.target.value)}
                   placeholder="0,00" aria-label={`Einzelpreis Position ${index + 1}`} />
-                <input type="text" inputMode="numeric" className="form-control eb-right" value={row.quantity}
+                <input type="text" inputMode="numeric" className="form-control text-right" value={row.quantity}
                   onChange={(e) => updateRow(index, 'quantity', e.target.value)}
                   aria-label={`Anzahl Position ${index + 1}`} />
                 <span className="eb-amount">{amount !== null ? formatEuro(amount) : '–'}</span>

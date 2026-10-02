@@ -26,6 +26,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Gemeinsame Prüfung jeder Antwort: eine abgelaufene Anmeldung führt zur
+ * Anmeldeseite, jede andere Fehlerantwort wird zum ApiError mit der Meldung
+ * des Servers.
+ */
+async function ensureOk(res: Response): Promise<void> {
+  if (res.status === 401) {
+    setToken(null);
+    window.location.href = '/login';
+    throw new ApiError('Nicht authentifiziert', 401);
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(body.error || `Fehler: ${res.status}`, res.status);
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -35,17 +53,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-
-  if (res.status === 401) {
-    setToken(null);
-    window.location.href = '/login';
-    throw new Error('Nicht authentifiziert');
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.error || `Fehler: ${res.status}`, res.status);
-  }
+  await ensureOk(res);
 
   if (res.status === 204) return undefined as T;
 
@@ -61,17 +69,7 @@ async function downloadBlob(path: string, filename: string): Promise<void> {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { headers });
-
-  if (res.status === 401) {
-    setToken(null);
-    window.location.href = '/login';
-    throw new Error('Nicht authentifiziert');
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Fehler: ${res.status}`);
-  }
+  await ensureOk(res);
 
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -97,17 +95,7 @@ async function uploadFiles<T>(
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form });
-
-  if (res.status === 401) {
-    setToken(null);
-    window.location.href = '/login';
-    throw new Error('Nicht authentifiziert');
-  }
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Fehler: ${res.status}`);
-  }
+  await ensureOk(res);
 
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -131,10 +119,8 @@ async function fetchBlobUrl(path: string, body?: unknown): Promise<string> {
   }
 
   const res = await fetch(`${API_BASE}${path}`, init);
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    throw new Error(errorBody.error || `Fehler: ${res.status}`);
-  }
+  await ensureOk(res);
+
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }

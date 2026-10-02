@@ -1,6 +1,17 @@
 /** So lange bleibt der unsichtbare Druck-Rahmen stehen — der Druckdialog braucht das Dokument, bis er geschlossen ist. */
 const PRINT_FRAME_LIFETIME_MS = 5 * 60 * 1000;
 
+/** Der Rahmen des letzten Drucks. Es gibt immer höchstens einen. */
+let active: { frame: HTMLIFrameElement; blobUrl: string; timer: number } | null = null;
+
+function release(): void {
+  if (!active) return;
+  window.clearTimeout(active.timer);
+  active.frame.remove();
+  URL.revokeObjectURL(active.blobUrl);
+  active = null;
+}
+
 /**
  * Öffnet den Druckdialog für ein PDF, das als Blob-URL vorliegt.
  *
@@ -9,9 +20,12 @@ const PRINT_FRAME_LIFETIME_MS = 5 * 60 * 1000;
  *
  * Die Funktion übernimmt die Blob-URL und gibt sie später selbst frei — der
  * Aufrufer darf sie nicht vorher mit revokeObjectURL entwerten, sonst lädt
- * der Druck-Rahmen ins Leere.
+ * der Druck-Rahmen ins Leere. Freigegeben wird beim nächsten Druck oder nach
+ * Ablauf der Frist, auch wenn der Rahmen nie fertig lädt.
  */
 export function printPdf(blobUrl: string): void {
+  release();
+
   const frame = document.createElement('iframe');
   frame.style.position = 'fixed';
   frame.style.width = '0';
@@ -29,12 +43,9 @@ export function printPdf(blobUrl: string): void {
     } catch {
       window.open(blobUrl, '_blank');
     }
-    window.setTimeout(() => {
-      frame.remove();
-      URL.revokeObjectURL(blobUrl);
-    }, PRINT_FRAME_LIFETIME_MS);
   };
 
   frame.src = blobUrl;
   document.body.appendChild(frame);
+  active = { frame, blobUrl, timer: window.setTimeout(release, PRINT_FRAME_LIFETIME_MS) };
 }

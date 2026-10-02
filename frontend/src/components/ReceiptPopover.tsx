@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { printPdf } from '../utils/printPdf';
-import { ReceiptUpload } from './ReceiptUpload';
+import { ReceiptUpload, formatBytes } from './ReceiptUpload';
 
 export interface ReceiptDto {
   id: string;
@@ -36,12 +36,6 @@ interface Props {
   belegartRequired?: boolean;
   onClose: () => void;
   onChanged: () => void;
-}
-
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  return `${(b / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function fileIcon(mime: string): string {
