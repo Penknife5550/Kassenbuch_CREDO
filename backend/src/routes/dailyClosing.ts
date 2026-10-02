@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
-import { calculateCashBalance, getNextReceiptNumber } from '../services/bookingService';
+import { calculateCashBalance, getNextReceiptNumber, isWriteConflict } from '../services/bookingService';
 import { generateKassensturzPdf } from '../services/pdfService';
 import { getClientIp } from '../utils/request';
 
@@ -287,6 +287,15 @@ dailyClosingRouter.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json(closing);
   } catch (err) {
+    // Eine Buchung im selben Moment laesst die Serializable-Transaktion des
+    // Abschlusses abbrechen. Geschrieben ist dann nichts, der Sollbestand in
+    // der Maske ist aber veraltet.
+    if (isWriteConflict(err)) {
+      res.status(409).json({
+        error: 'Während des Tagesabschlusses wurde gebucht. Bitte die Seite neu laden und den Abschluss noch einmal durchführen.',
+      });
+      return;
+    }
     console.error('POST /daily-closing error:', err);
     res.status(500).json({ error: 'Interner Serverfehler' });
   }

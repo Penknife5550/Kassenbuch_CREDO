@@ -7,7 +7,7 @@ import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import {
   getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx, isDayFinalized,
-  resolveBookingDate, createBookingInTx, assertNotStornoed, bookingErrorToResponse, COST_CENTER_GONE,
+  resolveBookingDate, createBookingInTx, assertDayOpen, assertNotStornoed, bookingErrorToResponse, COST_CENTER_GONE,
 } from '../services/bookingService';
 import { checkCostCentersUsable } from '../services/costCenterService';
 import { generateKassenbuchPdf } from '../services/pdfService';
@@ -393,6 +393,9 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
     const splitGroupId = crypto.randomUUID();
 
     const bookings = await prisma.$transaction(async (tx) => {
+      // Der Tagesabschluss kann seit der Pruefung oben fertig geworden sein.
+      await assertDayOpen(tx, schoolId, bookingDate);
+
       // Balance check for Ausgabe (H)
       if (parsed.data.debitCredit === 'H') {
         const currentBalance = await calculateCashBalanceTx(tx, schoolId);
@@ -466,6 +469,7 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
 
 const ALREADY_STORNOED = 'Diese Buchung wurde bereits storniert';
 const SPLIT_ALREADY_STORNOED = 'Diese Splittbuchung wurde bereits storniert';
+const STORNO_DAY_CLOSED = 'Tagesabschluss bereits durchgeführt';
 
 bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
   try {
@@ -510,7 +514,7 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
 
     const finalized = await isDayFinalized(schoolId, today);
     if (finalized) {
-      res.status(409).json({ error: 'Tagesabschluss bereits durchgeführt' });
+      res.status(409).json({ error: STORNO_DAY_CLOSED });
       return;
     }
 
@@ -543,8 +547,10 @@ bookingsRouter.post('/:id/storno', async (req: Request, res: Response) => {
 
     // Atomic transaction: balance check + receipt number + storno creation
     const stornoBookings = await prisma.$transaction(async (tx) => {
-      // Die Pruefungen oben liefen vor der Transaktion. Ein zweiter Storno
-      // derselben Buchung kann inzwischen fertig sein — hier faellt er auf.
+      // Die Pruefungen oben liefen vor der Transaktion. Ein Tagesabschluss oder
+      // ein zweiter Storno derselben Buchung kann inzwischen fertig sein —
+      // hier faellt beides auf.
+      await assertDayOpen(tx, schoolId, today, STORNO_DAY_CLOSED);
       await assertNotStornoed(
         tx,
         originalsToStorno.map((b) => b.id),

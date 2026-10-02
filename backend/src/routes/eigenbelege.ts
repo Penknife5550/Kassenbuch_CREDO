@@ -5,10 +5,9 @@ import { prisma } from '../prismaClient';
 import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import {
-  TxClient, isDayFinalized, resolveBookingDate, createBookingInTx, retryOnWriteConflict,
-  bookingErrorToResponse, ACCOUNT_GONE, COST_CENTER_GONE,
+  TxClient, resolveBookingDate, createBookingInTx, retryOnWriteConflict,
+  bookingErrorToResponse, ACCOUNT_GONE,
 } from '../services/bookingService';
-import { checkCostCentersUsable } from '../services/costCenterService';
 import { EIGENBELEG_BELEGART } from '../services/belegartService';
 import {
   EIGENBELEG_LIMITS, EigenbelegPosition, buildPositions, centsToDecimal,
@@ -126,14 +125,33 @@ function pdfBase(p: Prepared) {
 }
 
 /**
+ * Die Belegdatei des laufenden Versuchs. Sie liegt ausserhalb der Datenbank
+ * und muss nach einem Rollback wieder weg; je Versuch gibt es hoechstens eine.
+ */
+interface StoredFile {
+  path: string | null;
+}
+
+/**
  * Buchung, PDF und Verknuepfung in EINER Transaktion: scheitert ein Schritt,
  * entsteht nichts — weder eine Buchung ohne Beleg noch ein Beleg ohne Buchung.
  *
- * Das PDF wird erst gerendert, wenn die Belegnummer feststeht. Die Datei liegt
- * ausserhalb der Datenbank; ihr Pfad wandert deshalb sofort in `storedPaths`,
- * damit der Aufrufer sie nach einem Rollback wieder entfernen kann.
+ * Das PDF wird erst gerendert, wenn die Belegnummer feststeht. Der Pfad der
+ * Datei wandert sofort in `stored`, damit der Aufrufer sie nach einem Rollback
+ * wieder entfernen kann.
  */
-async function createEigenbelegInTx(tx: TxClient, p: Prepared, userId: string, storedPaths: string[]) {
+async function createEigenbelegInTx(tx: TxClient, p: Prepared, userId: string, stored: StoredFile) {
+  // Die Belegart kann beim Mandanten geloescht oder deaktiviert sein. Der Beleg
+  // braucht sie trotzdem, sonst ginge er mit leerer Dokumentart in den DMS-Export.
+  // Sie steht vor der Buchung: createBookingInTx sperrt den Belegnummern-Zaehler
+  // des Mandanten, und der soll so kurz wie moeglich gesperrt bleiben.
+  const belegart = await tx.belegart.upsert({
+    where: { schoolId_code: { schoolId: p.schoolId, code: EIGENBELEG_BELEGART.code } },
+    update: {},
+    create: { schoolId: p.schoolId, ...EIGENBELEG_BELEGART },
+  });
+
+  // Prueft auch Kostenstelle und Tagesabschluss — bei jedem Versuch aufs Neue.
   const booking = await createBookingInTx(tx, {
     schoolId: p.schoolId,
     bookingDate: p.bookingDate,
@@ -146,14 +164,6 @@ async function createEigenbelegInTx(tx: TxClient, p: Prepared, userId: string, s
     createdById: userId,
   });
 
-  // Die Belegart kann beim Mandanten geloescht oder deaktiviert sein. Der Beleg
-  // braucht sie trotzdem, sonst ginge er mit leerer Dokumentart in den DMS-Export.
-  const belegart = await tx.belegart.upsert({
-    where: { schoolId_code: { schoolId: p.schoolId, code: EIGENBELEG_BELEGART.code } },
-    update: {},
-    create: { schoolId: p.schoolId, ...EIGENBELEG_BELEGART },
-  });
-
   const pdf = await renderEigenbelegPdf({
     ...pdfBase(p),
     receiptNumber: booking.receiptNumber,
@@ -164,18 +174,18 @@ async function createEigenbelegInTx(tx: TxClient, p: Prepared, userId: string, s
     createdAt: booking.createdAt,
   });
 
-  const stored = await storeReceipt(p.schoolId, p.bookingDate, pdf.buffer, PDF_FILE);
-  storedPaths.push(stored.storagePath);
+  const file = await storeReceipt(p.schoolId, p.bookingDate, pdf.buffer, PDF_FILE);
+  stored.path = file.storagePath;
 
   const receipt = await tx.bookingReceipt.create({
     data: {
       bookingId: booking.id,
       belegartId: belegart.id,
       originalName: `Eigenbeleg_${p.school.code}_${booking.receiptNumber}.pdf`,
-      mimeType: stored.mimeType,
-      sizeBytes: stored.sizeBytes,
-      storagePath: stored.storagePath,
-      sha256: stored.sha256,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      storagePath: file.storagePath,
+      sha256: file.sha256,
       pageCount: pdf.pageCount,
       uploadedById: userId,
     },
@@ -195,53 +205,49 @@ async function createEigenbelegInTx(tx: TxClient, p: Prepared, userId: string, s
   return { booking, receipt };
 }
 
+/** Loescht die Datei eines Versuchs, dessen Transaktion sicher zurueckgerollt ist. */
+async function dropStoredFile(stored: StoredFile): Promise<void> {
+  if (!stored.path) return;
+  await deleteReceiptFile(stored.path);
+  stored.path = null;
+}
+
 /**
- * Entfernt Dateien, zu denen es nach einem Rollback keinen Beleg gibt. Liefert
- * true, wenn eine Datei doch zu einem gespeicherten Beleg gehoert: reisst die
- * Verbindung genau beim Commit ab, meldet Prisma einen Fehler, obwohl gebucht
- * ist. Diese Datei darf dann nicht verschwinden — deshalb erst nachsehen.
+ * Raeumt nach einem Fehler mit offenem Ausgang auf und liefert true, wenn
+ * sicher nichts gebucht ist. Reisst die Verbindung genau beim Commit ab, meldet
+ * Prisma einen Fehler, obwohl gebucht ist — die Datei verschwindet deshalb
+ * nur, wenn kein Beleg auf sie verweist.
  */
-async function removeOrphanFiles(storedPaths: string[]): Promise<boolean> {
-  let committed = false;
-  for (const storagePath of storedPaths.splice(0)) {
-    if (await prisma.bookingReceipt.count({ where: { storagePath } }) > 0) committed = true;
-    else await deleteReceiptFile(storagePath);
-  }
-  return committed;
+async function nothingWasBooked(stored: StoredFile): Promise<boolean> {
+  if (!stored.path) return true;
+  const receipts = await prisma.bookingReceipt.count({ where: { storagePath: stored.path } });
+  if (receipts > 0) return false;
+  await dropStoredFile(stored);
+  return true;
 }
 
 // ─── Eigenbeleg buchen ──────────────────────────────────────────────────────
 eigenbelegeRouter.post('/', async (req: Request, res: Response) => {
-  const storedPaths: string[] = [];
+  const stored: StoredFile = { path: null };
+  let booked = false;
   try {
     const p = await prepare(req, res);
     if (!p) return;
 
-    const costCenterCheck = await checkCostCentersUsable(prisma, [p.input.costCenterId]);
-    if (!costCenterCheck.ok) {
-      res.status(400).json({ error: COST_CENTER_GONE });
-      return;
-    }
-
-    const finalized = await isDayFinalized(p.schoolId, p.bookingDate);
-    if (finalized) {
-      res.status(409).json({ error: 'Tagesabschluss für dieses Datum bereits durchgeführt. Keine Buchungen möglich.' });
-      return;
-    }
-
     const userId = req.user!.userId;
-    // Jeder abgebrochene Versuch hat schon eine Datei geschrieben — sie muss
-    // weg, bevor der naechste Versuch seine eigene anlegt.
+    // Ein Schreibkonflikt heisst: sicher zurueckgerollt. Die Datei des
+    // abgebrochenen Versuchs kann ohne Nachsehen weg, bevor der naechste
+    // Versuch seine eigene anlegt.
     const result = await retryOnWriteConflict(
       () => prisma.$transaction(
-        (tx) => createEigenbelegInTx(tx, p, userId, storedPaths),
+        (tx) => createEigenbelegInTx(tx, p, userId, stored),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       ),
-      () => removeOrphanFiles(storedPaths),
+      () => dropStoredFile(stored),
     );
-    // Ab hier gehoert die Datei zu einem gespeicherten Beleg und darf nicht
-    // mehr als verwaist entfernt werden.
-    storedPaths.length = 0;
+    // Ab hier gehoert die Datei zu einem gespeicherten Beleg.
+    booked = true;
+    stored.path = null;
 
     try {
       await logAudit({
@@ -277,21 +283,21 @@ eigenbelegeRouter.post('/', async (req: Request, res: Response) => {
       payeeSigns: p.payeeSigns,
     });
   } catch (err) {
-    // Sicher nichts gebucht ist nur, wenn keine Datei mehr zu einem Beleg
-    // gehoert. Laesst sich das nicht pruefen, bleibt der Stand offen.
-    const nothingBooked = await removeOrphanFiles(storedPaths)
-      .then((committed) => !committed)
-      .catch((cleanupErr) => {
-        console.error('POST /eigenbelege: Aufräumen verwaister Dateien fehlgeschlagen:', cleanupErr);
-        return false;
-      });
-
-    const known = bookingErrorToResponse(err);
+    // Fachliche Absage oder Schreibkonflikt: die Transaktion ist sicher zurueckgerollt.
+    const known = booked ? null : bookingErrorToResponse(err);
     if (known) {
+      await dropStoredFile(stored);
       res.status(known.status).json({ error: known.error });
       return;
     }
+
     console.error('POST /eigenbelege error:', err);
+    // Bei jedem anderen Fehler steht nicht fest, ob der Commit durchging.
+    // Laesst sich das nicht nachsehen, bleibt der Stand offen.
+    const nothingBooked = !booked && await nothingWasBooked(stored).catch((cleanupErr) => {
+      console.error('POST /eigenbelege: Aufräumen der Belegdatei fehlgeschlagen:', cleanupErr);
+      return false;
+    });
     res.status(500).json({
       error: nothingBooked
         ? 'Der Eigenbeleg konnte nicht erzeugt werden. Es wurde nichts gebucht.'

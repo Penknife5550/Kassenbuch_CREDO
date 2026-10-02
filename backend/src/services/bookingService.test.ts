@@ -22,11 +22,13 @@ import {
   isDayFinalized,
   resolveBookingDate,
   createBookingInTx,
+  assertDayOpen,
   assertNotStornoed,
   bookingErrorToResponse,
   retryOnWriteConflict,
   COST_CENTER_GONE,
   ACCOUNT_GONE,
+  DAY_CLOSED,
   WRITE_CONFLICT,
 } from './bookingService';
 
@@ -223,11 +225,13 @@ describe('bookingService', () => {
       createdById: 'user-1',
     };
 
-    function makeTx(balance: number) {
+    function makeTx(balance: number, state: { dayClosed?: boolean; costCenters?: Array<{ id: string; isActive: boolean }> } = {}) {
       return {
         $queryRaw: vi.fn().mockResolvedValue([{ balance: new Prisma.Decimal(balance) }]),
         receiptSequence: { update: vi.fn().mockResolvedValue({ lastNumber: 43 }) },
         booking: { create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'booking-1', ...data })) },
+        dailyClosing: { findUnique: vi.fn().mockResolvedValue(state.dayClosed ? { id: 'closing-1' } : null) },
+        costCenter: { findMany: vi.fn().mockResolvedValue(state.costCenters ?? []) },
       };
     }
 
@@ -265,6 +269,57 @@ describe('bookingService', () => {
       expect(tx.$queryRaw).not.toHaveBeenCalled();
       expect(tx.booking.create).toHaveBeenCalled();
     });
+
+    // Der Tagesabschluss kann zwischen der Vorab-Pruefung der Route und der
+    // Buchung fertig werden. Die Pruefung in der Transaktion faengt das ab —
+    // auch beim Wiederholungsversuch nach einem Schreibkonflikt mit dem Abschluss.
+    it('bucht nicht in einen abgeschlossenen Tag und zieht dann keine Belegnummer', async () => {
+      const tx = makeTx(250, { dayClosed: true });
+
+      await expect(createBookingInTx(tx as any, input)).rejects.toThrow(`CLOSED:${DAY_CLOSED}`);
+      expect(tx.dailyClosing.findUnique).toHaveBeenCalledWith({
+        where: { schoolId_closingDate: { schoolId: 'school-1', closingDate: input.bookingDate } },
+      });
+      expect(tx.receiptSequence.update).not.toHaveBeenCalled();
+      expect(tx.booking.create).not.toHaveBeenCalled();
+    });
+
+    it('bucht nicht auf eine deaktivierte oder verschwundene Kostenstelle', async () => {
+      const deactivated = makeTx(250, { costCenters: [{ id: 'kst-1', isActive: false }] });
+      const missing = makeTx(250, { costCenters: [] });
+
+      await expect(createBookingInTx(deactivated as any, { ...input, costCenterId: 'kst-1' })).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
+      await expect(createBookingInTx(missing as any, { ...input, costCenterId: 'kst-1' })).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
+      expect(deactivated.booking.create).not.toHaveBeenCalled();
+      expect(missing.booking.create).not.toHaveBeenCalled();
+    });
+
+    it('bucht auf eine aktive Kostenstelle und fragt ohne Kostenstelle gar nicht nach', async () => {
+      const withCostCenter = makeTx(250, { costCenters: [{ id: 'kst-1', isActive: true }] });
+      const without = makeTx(250);
+
+      await expect(createBookingInTx(withCostCenter as any, { ...input, costCenterId: 'kst-1' })).resolves.toBeDefined();
+      await expect(createBookingInTx(without as any, input)).resolves.toBeDefined();
+      expect(without.costCenter.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertDayOpen', () => {
+    it('fragt den Abschluss ueber die Transaktion ab, nicht ueber die globale Verbindung', async () => {
+      const tx = { dailyClosing: { findUnique: vi.fn().mockResolvedValue(null) } };
+
+      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).resolves.toBeUndefined();
+      expect(tx.dailyClosing.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.dailyClosing.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('bricht mit der Meldung des Aufrufers ab, wenn der Tag abgeschlossen ist', async () => {
+      const tx = { dailyClosing: { findUnique: vi.fn().mockResolvedValue({ id: 'closing-1' }) } };
+
+      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'))).rejects.toThrow(`CLOSED:${DAY_CLOSED}`);
+      await expect(assertDayOpen(tx as any, 'school-1', new Date('2024-03-15'), 'Tagesabschluss bereits durchgeführt'))
+        .rejects.toThrow('CLOSED:Tagesabschluss bereits durchgeführt');
+    });
   });
 
   describe('assertNotStornoed', () => {
@@ -300,6 +355,11 @@ describe('bookingService', () => {
     it('macht aus dem Storno-Konflikt eine 409 ohne das interne Praefix', () => {
       expect(bookingErrorToResponse(new Error('STORNO:Diese Buchung wurde bereits storniert')))
         .toEqual({ status: 409, error: 'Diese Buchung wurde bereits storniert' });
+    });
+
+    it('meldet den abgeschlossenen Tag als 409 und die fehlende Kostenstelle als 400', () => {
+      expect(bookingErrorToResponse(new Error(`CLOSED:${DAY_CLOSED}`))).toEqual({ status: 409, error: DAY_CLOSED });
+      expect(bookingErrorToResponse(new Error(`GONE:${COST_CENTER_GONE}`))).toEqual({ status: 400, error: COST_CENTER_GONE });
     });
 
     it('nennt bei verletztem Fremdschluessel die Kostenstelle oder das Konto', () => {

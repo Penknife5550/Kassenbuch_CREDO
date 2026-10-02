@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../prismaClient';
+import { checkCostCentersUsable } from './costCenterService';
 
 export type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -41,8 +42,12 @@ export async function calculateCashBalanceTx(tx: TxClient, schoolId: string): Pr
   return result[0]?.balance ?? new Prisma.Decimal(0);
 }
 
-export async function isDayFinalized(schoolId: string, date: Date): Promise<boolean> {
-  const closing = await prisma.dailyClosing.findUnique({
+export async function isDayFinalized(
+  schoolId: string,
+  date: Date,
+  db: Pick<TxClient, 'dailyClosing'> = prisma,
+): Promise<boolean> {
+  const closing = await db.dailyClosing.findUnique({
     where: {
       schoolId_closingDate: {
         schoolId,
@@ -51,6 +56,22 @@ export async function isDayFinalized(schoolId: string, date: Date): Promise<bool
     },
   });
   return !!closing;
+}
+
+export const DAY_CLOSED = 'Tagesabschluss für dieses Datum bereits durchgeführt. Keine Buchungen möglich.';
+
+/**
+ * Stellt IN der Transaktion sicher, dass der Tag nicht abgeschlossen ist. Die
+ * Routen pruefen das vorab — ein Tagesabschluss kann aber zwischen jener
+ * Pruefung und der Buchung fertig werden. Ohne diese Pruefung landete die
+ * Buchung dann unfestgeschrieben im abgeschlossenen Tag, an Soll- und
+ * Istbestand des Abschlusses vorbei. Ueberlappen sich Abschluss und Buchung,
+ * bricht Serializable eine der beiden Transaktionen ab (P2034).
+ *
+ * Wirft `CLOSED:<Meldung>` — bookingErrorToResponse macht daraus die 409-Antwort.
+ */
+export async function assertDayOpen(tx: TxClient, schoolId: string, date: Date, message = DAY_CLOSED): Promise<void> {
+  if (await isDayFinalized(schoolId, date, tx)) throw new Error(`CLOSED:${message}`);
 }
 
 export type BookingDateResult =
@@ -87,14 +108,22 @@ export interface NewBooking {
 }
 
 /**
- * Legt eine Einzelbuchung in einer laufenden Transaktion an: Saldo-Pruefung bei
- * Ausgaben, naechste Belegnummer, Buchung. Die Transaktion muss Serializable
- * laufen, sonst ist die Saldo-Pruefung gegen parallele Buchungen nicht dicht.
+ * Legt eine Einzelbuchung in einer laufenden Transaktion an: Kostenstelle
+ * nutzbar, Tag nicht abgeschlossen, Saldo-Pruefung bei Ausgaben, naechste
+ * Belegnummer, Buchung. Die Transaktion muss Serializable laufen, sonst sind
+ * die Pruefungen gegen parallele Buchungen und Abschluesse nicht dicht.
  *
- * Wirft `BALANCE:<Meldung>`, wenn die Ausgabe den Kassenbestand ins Minus
- * braechte — bookingErrorToResponse macht daraus die 409-Antwort.
+ * Alle Pruefungen stehen hier und nicht davor, damit ein Wiederholungsversuch
+ * (retryOnWriteConflict) sie erneut durchlaeuft.
+ *
+ * Wirft `GONE:`, `CLOSED:` oder `BALANCE:` mit der Meldung dahinter —
+ * bookingErrorToResponse macht daraus die Antwort.
  */
 export async function createBookingInTx(tx: TxClient, input: NewBooking) {
+  const costCenters = await checkCostCentersUsable(tx, [input.costCenterId]);
+  if (!costCenters.ok) throw new Error(`GONE:${COST_CENTER_GONE}`);
+  await assertDayOpen(tx, input.schoolId, input.bookingDate);
+
   if (input.debitCredit === 'H') {
     const currentBalance = await calculateCashBalanceTx(tx, input.schoolId);
     const newBalance = currentBalance.sub(input.amount);
@@ -205,8 +234,11 @@ export async function retryOnWriteConflict<T>(
   }
 }
 
-/** Fachliche Absagen aus einer Transaktion tragen eines dieser Praefixe; der Text dahinter geht an den Anwender. */
-const CONFLICT_PREFIXES = ['BALANCE:', 'STORNO:'];
+/**
+ * Fachliche Absagen aus einer Transaktion tragen eines dieser Praefixe, der
+ * Text dahinter geht an den Anwender. Der Wert ist der HTTP-Status.
+ */
+const REJECTIONS: Record<string, number> = { 'BALANCE:': 409, 'STORNO:': 409, 'CLOSED:': 409, 'GONE:': 400 };
 
 /**
  * Uebersetzt die erwartbaren Fehler einer Buchungs-Transaktion in Status und
@@ -217,8 +249,8 @@ export function bookingErrorToResponse(err: unknown): { status: number; error: s
   if (fkMessage) return { status: 400, error: fkMessage };
   if (err instanceof Error) {
     const { message } = err;
-    const prefix = CONFLICT_PREFIXES.find((p) => message.startsWith(p));
-    if (prefix) return { status: 409, error: message.slice(prefix.length) };
+    const prefix = Object.keys(REJECTIONS).find((p) => message.startsWith(p));
+    if (prefix) return { status: REJECTIONS[prefix], error: message.slice(prefix.length) };
   }
   if (isWriteConflict(err)) return { status: 409, error: WRITE_CONFLICT };
   return null;
