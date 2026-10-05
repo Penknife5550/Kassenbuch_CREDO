@@ -570,14 +570,29 @@
         </thead>
         <tbody>
           <tr>
-            <td>Anmeldung fehlgeschlagen</td>
-            <td>Benutzername oder Passwort stimmen nicht.</td>
+            <td>Ungültige Anmeldedaten</td>
+            <td>Benutzername oder Passwort stimmen nicht, oder dein Zugang wurde deaktiviert.</td>
             <td>Tippe beides erneut ein. Achte auf Groß- und Kleinschreibung. Hilft das nicht, frag die Verwaltung.</td>
           </tr>
           <tr>
             <td>Bitte einen gültigen Betrag eingeben</td>
             <td>Im Betragsfeld steht keine gültige Zahl.</td>
-            <td>Schreib den Betrag mit Komma, zum Beispiel <code>12,50</code>. Keine Buchstaben verwenden.</td>
+            <td>Schreib den Betrag mit Komma, zum Beispiel <code>12,50</code>. Tausenderpunkte sind erlaubt, zum Beispiel <code>1.250,00</code>. Keine Buchstaben verwenden.</td>
+          </tr>
+          <tr>
+            <td>Das Buchungsdatum liegt vor dem Jahr 2000</td>
+            <td>Das Jahr wurde wahrscheinlich nur zweistellig eingetippt.</td>
+            <td>Trag das Jahr vierstellig ein, zum Beispiel <code>2026</code>.</td>
+          </tr>
+          <tr>
+            <td>Gebucht. Der Beleg konnte aber nicht hochgeladen werden</td>
+            <td>Die Buchung ist gespeichert. Nur die Datei ist nicht angekommen, etwa weil sie zu groß ist oder die Verbindung abbrach.</td>
+            <td>Buche nicht noch einmal. Häng den Beleg über das Büroklammer-Symbol 📎 an die Buchung.</td>
+          </tr>
+          <tr>
+            <td>Bitte bei „…“ einen lesbaren Text eintragen<br>Position …: Bitte eine lesbare Bezeichnung eintragen</td>
+            <td>Im genannten Feld des Eigenbelegs stehen nur unsichtbare Zeichen. Das passiert beim Kopieren aus Listen oder Tabellen.</td>
+            <td>Lösche den Inhalt des Feldes und tippe den Text von Hand ein.</td>
           </tr>
           <tr>
             <td>Bitte alle Beträge aufteilen. Noch … € offen.</td>
@@ -625,6 +640,11 @@
             <td>Wähle ein späteres Datum. Fehlt eine Buchung aus der abgeschlossenen Zeit, sprich mit der Verwaltung, bevor du sie nachträgst.</td>
           </tr>
           <tr>
+            <td>Die Kasse ist für heute bereits abgeschlossen</td>
+            <td>Der Tagesabschluss für heute ist schon gemacht.</td>
+            <td>Buche morgen. Fehlt eine Buchung von heute, sprich mit der Verwaltung.</td>
+          </tr>
+          <tr>
             <td>Du wirst plötzlich abgemeldet</td>
             <td>Deine Anmeldung ist abgelaufen.</td>
             <td>Melde dich einfach neu an. Deine gespeicherten Buchungen bleiben erhalten.</td>
@@ -646,7 +666,7 @@
           </tr>
           <tr>
             <td>Während des Tagesabschlusses wurde gebucht</td>
-            <td>Jemand hat im selben Moment für dieselbe Kasse gebucht. Der Abschluss wurde deshalb nicht gespeichert.</td>
+            <td>Seit du die Seite geöffnet hast, wurde für dieselbe Kasse gebucht. Der Sollbestand auf der Seite stimmt nicht mehr, der Abschluss wurde deshalb nicht gespeichert.</td>
             <td>Lade die Seite neu. Der Sollbestand enthält dann die neue Buchung. Führe den Abschluss noch einmal durch.</td>
           </tr>
           <tr>
