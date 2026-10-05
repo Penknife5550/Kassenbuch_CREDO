@@ -158,6 +158,9 @@ export function DailyClosing() {
       const body: Record<string, unknown> = {
         actualBalance: istbestand,
         denominationCounts: counts,
+        // Der Sollbestand, den diese Seite gezeigt hat. Wurde seither gebucht,
+        // lehnt der Server ab, statt eine Differenz zu buchen, die niemand gesehen hat.
+        expectedBalance: status?.expectedBalance,
       };
       if (hasDifference) {
         body.comment = comment;

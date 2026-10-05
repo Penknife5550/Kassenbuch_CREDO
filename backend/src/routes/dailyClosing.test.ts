@@ -6,6 +6,7 @@ const mockPrisma = {
   dailyClosing: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
+    findFirst: vi.fn().mockResolvedValue(null),
     create: vi.fn(),
   },
   booking: {
@@ -276,6 +277,40 @@ describe('dailyClosing route - business logic', () => {
       expect(tx.booking.create).not.toHaveBeenCalled();
       expect(tx.booking.updateMany).not.toHaveBeenCalled();
       expect(tx.dailyClosing.create).not.toHaveBeenCalled();
+    });
+
+    // Die Maske laedt den Sollbestand beim Oeffnen. Bucht jemand waehrend des
+    // Zaehlens, darf der Abschluss nicht mit einer Differenz durchlaufen, die
+    // der Anwender so nie gesehen hat.
+    it('schliesst nicht ab, wenn der Sollbestand der Maske nicht mehr stimmt', async () => {
+      const tx = makeTx({ balance: 1000 });
+      runIn(tx);
+
+      const res = await close({ ...withDifference, expectedBalance: '950.00' });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: expect.stringContaining('Während des Tagesabschlusses wurde gebucht') });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('schliesst ab, wenn die Maske denselben Sollbestand gezeigt hat', async () => {
+      const tx = makeTx({ balance: 1000 });
+      runIn(tx);
+
+      const res = await close({ ...withDifference, expectedBalance: '1000' });
+
+      expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    // Vorher kam aus einem Fenster von vorhin "Kommentar erforderlich" statt des eigentlichen Grunds.
+    it('meldet einen schon abgeschlossenen Tag vor jeder Eingabepruefung', async () => {
+      mockPrisma.dailyClosing.findFirst.mockResolvedValueOnce({ id: 'closing-1' });
+
+      const res = await close({ actualBalance: 1234 });
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Tagesabschluss für heute bereits durchgeführt' });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('weist einen zweiten Abschluss desselben Tages ab, ohne etwas festzuschreiben', async () => {

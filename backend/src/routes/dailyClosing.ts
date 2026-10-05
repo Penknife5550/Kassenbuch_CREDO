@@ -132,7 +132,9 @@ dailyClosingRouter.get('/kassensturz/:id', async (req: Request, res: Response) =
     });
 
     const dateStr = closing.closingDate.toISOString().slice(0, 10);
-    const filename = `Kassensturz_${closing.school.code}_${dateStr}.pdf`;
+    // Im Header sind nur einfache Zeichen erlaubt — ein Kuerzel mit Gedankenstrich brach den Download ab
+    const safeCode = closing.school.code.replace(/[^A-Za-z0-9_-]+/g, '_');
+    const filename = `Kassensturz_${safeCode}_${dateStr}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -163,6 +165,8 @@ const denominationCountsSchema = z.object({
 
 const closeSchema = z.object({
   actualBalance: z.number().min(0),
+  // Der Sollbestand, den die Maske beim Zaehlen gezeigt hat (wie aus GET /status)
+  expectedBalance: z.string().regex(/^-?\d+(\.\d+)?$/).optional(),
   comment: z.string().min(10).optional(),
   denominationCounts: denominationCountsSchema.optional(),
   createCorrectionBooking: z.boolean().default(false),
@@ -190,7 +194,29 @@ dailyClosingRouter.post('/', async (req: Request, res: Response) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Zuerst der eigentliche Grund: ein Fenster von vorhin bekaeme sonst
+    // "Kommentar erforderlich" statt "bereits durchgefuehrt". Verbindlich
+    // prueft das die Transaktion unten.
+    const closedAlready = await prisma.dailyClosing.findFirst({
+      where: { schoolId, closingDate: { gte: today } },
+      select: { id: true },
+    });
+    if (closedAlready) {
+      res.status(409).json({ error: ALREADY_CLOSED });
+      return;
+    }
+
     const expectedBalance = await calculateCashBalance(schoolId);
+
+    // Die Maske laedt den Sollbestand beim Oeffnen. Wurde waehrend des Zaehlens
+    // gebucht, haette der Anwender eine Differenz bestaetigt, die es so nicht
+    // gibt — und die Korrekturbuchung liefe ueber einen Betrag, den niemand gesehen hat.
+    if (parsed.data.expectedBalance !== undefined
+      && !new Prisma.Decimal(parsed.data.expectedBalance).equals(expectedBalance)) {
+      res.status(409).json({ error: BOOKED_MEANWHILE });
+      return;
+    }
+
     const actualBalance = new Prisma.Decimal(parsed.data.actualBalance);
     const difference = actualBalance.sub(expectedBalance);
 
