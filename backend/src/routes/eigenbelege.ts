@@ -13,6 +13,7 @@ import {
   EIGENBELEG_LIMITS, EigenbelegPosition, buildPositions, centsToDecimal,
 } from '../services/eigenbelegService';
 import { renderEigenbelegPdf } from '../services/eigenbelegPdf';
+import { hasPrintableText } from '../services/pdfText';
 import { RECEIPT_ISSUER_MISSING, getReceiptIssuer } from '../services/receiptIssuerService';
 import { storeReceipt, deleteReceiptFile } from '../services/uploadService';
 import { getClientIp } from '../utils/request';
@@ -20,8 +21,28 @@ import { getClientIp } from '../utils/request';
 export const eigenbelegeRouter = Router();
 eigenbelegeRouter.use(authenticate);
 
+// Was nach dem Aufbereiten fuer das PDF leer waere (nur unsichtbare Zeichen),
+// gilt nicht als ausgefuellt — sonst stuende eine leere Zeile im Beleg.
+const printable = (min = 1) => (text: string) => hasPrintableText(text, min);
+const NOT_PRINTABLE = 'Bitte einen lesbaren Text eintragen.';
+
+/**
+ * Meldung fuer ein Feld, das nur unsichtbare Zeichen enthaelt — mit dem
+ * Feldnamen aus der Maske. Die Maske selbst erkennt solche Eingaben nicht;
+ * ohne Feldnamen wuesste niemand, wo der Fehler steckt.
+ */
+function unreadableMessage(path: (string | number)[], debitCredit: unknown): string {
+  const [field, index] = path;
+  if (field === 'positions' && typeof index === 'number') {
+    return `Position ${index + 1}: Bitte eine lesbare Bezeichnung eintragen.`;
+  }
+  const name = field === 'counterparty' ? (debitCredit === 'H' ? 'Ausgezahlt an' : 'Eingenommen von')
+    : field === 'reason' ? 'Erläuterung' : 'Buchungstext';
+  return `Bitte bei „${name}“ einen lesbaren Text eintragen.`;
+}
+
 const positionSchema = z.object({
-  label: z.string().trim().min(1).max(EIGENBELEG_LIMITS.maxLabelLength),
+  label: z.string().trim().min(1).max(EIGENBELEG_LIMITS.maxLabelLength).refine(printable(), NOT_PRINTABLE),
   unitPrice: z.number().positive().max(EIGENBELEG_LIMITS.maxUnitPrice),
   quantity: z.number().int().min(1).max(EIGENBELEG_LIMITS.maxQuantity),
 });
@@ -32,9 +53,9 @@ const eigenbelegSchema = z.object({
   accountId: z.string().uuid(),
   counterAccountId: z.string().uuid(),
   costCenterId: z.string().uuid().optional(),
-  description: z.string().trim().min(1).max(500),
-  counterparty: z.string().trim().min(1).max(EIGENBELEG_LIMITS.maxCounterpartyLength),
-  reason: z.string().trim().min(3).max(EIGENBELEG_LIMITS.maxReasonLength),
+  description: z.string().trim().min(1).max(500).refine(printable(), NOT_PRINTABLE),
+  counterparty: z.string().trim().min(1).max(EIGENBELEG_LIMITS.maxCounterpartyLength).refine(printable(), NOT_PRINTABLE),
+  reason: z.string().trim().min(3).max(EIGENBELEG_LIMITS.maxReasonLength).refine(printable(3), NOT_PRINTABLE),
   payeeSigns: z.boolean().default(false),
   positions: z.array(positionSchema).min(1).max(EIGENBELEG_LIMITS.maxPositions),
 });
@@ -66,7 +87,11 @@ async function prepare(req: Request, res: Response): Promise<Prepared | null> {
 
   const parsed = eigenbelegSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Ungültige Angaben zum Eigenbeleg', details: parsed.error.flatten() });
+    const unreadable = parsed.error.issues.find((issue) => issue.message === NOT_PRINTABLE);
+    res.status(400).json({
+      error: unreadable ? unreadableMessage(unreadable.path, req.body?.debitCredit) : 'Ungültige Angaben zum Eigenbeleg',
+      details: parsed.error.flatten(),
+    });
     return null;
   }
 
@@ -312,7 +337,7 @@ eigenbelegeRouter.post('/preview', async (req: Request, res: Response) => {
     const p = await prepare(req, res);
     if (!p) return;
 
-    const accountSelect = { accountNumber: true, name: true };
+    const accountSelect = { accountNumber: true, name: true, isActive: true };
     const [account, counterAccount, costCenter, user] = await Promise.all([
       prisma.account.findUnique({ where: { id: p.input.accountId }, select: accountSelect }),
       prisma.account.findUnique({ where: { id: p.input.counterAccountId }, select: accountSelect }),
@@ -321,7 +346,8 @@ eigenbelegeRouter.post('/preview', async (req: Request, res: Response) => {
         : null,
       prisma.user.findUnique({ where: { id: req.user!.userId }, select: { displayName: true } }),
     ]);
-    if (!account || !counterAccount) {
+    // Dieselbe Regel wie beim Buchen: ein deaktiviertes Konto gibt es nicht mehr
+    if (!account?.isActive || !counterAccount?.isActive) {
       res.status(400).json({ error: ACCOUNT_GONE });
       return;
     }
