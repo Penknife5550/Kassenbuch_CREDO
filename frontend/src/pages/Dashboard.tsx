@@ -16,6 +16,7 @@ import { ReceiptUpload } from '../components/ReceiptUpload';
 import { ReceiptPopover, BelegartDto, ReceiptDto } from '../components/ReceiptPopover';
 import { EigenbelegForm, EigenbelegResult } from '../components/EigenbelegForm';
 import { EigenbelegDone } from '../components/EigenbelegDone';
+import { MIN_BOOKING_DATE, centsToEuros, formatCents, parseAmountCents } from '../utils/bookingInput';
 
 interface Account {
   id: string;
@@ -377,7 +378,12 @@ export function Dashboard() {
           onCreated={(opts) => {
             setNewBookingMode(null);
             loadBookings();
-            if (opts.noReceiptUploaded) {
+            if (opts.uploadError) {
+              // Servermeldungen enden meist ohne Punkt ("Datei zu groß")
+              const reason = /[.!?]$/.test(opts.uploadError) ? opts.uploadError : `${opts.uploadError}.`;
+              setToast(`Gebucht. Der Beleg konnte aber nicht hochgeladen werden: ${reason} Bitte über die Büroklammer nachreichen.`);
+              setTimeout(() => setToast(''), 15000);
+            } else if (opts.noReceiptUploaded) {
               setToast('Hinweis: Du hast keinen Beleg angehängt. Du kannst das später nachholen.');
               setTimeout(() => setToast(''), 6000);
             }
@@ -410,11 +416,14 @@ export function Dashboard() {
         />
       )}
 
-      {/* Toast */}
+      {/* Toast — unter den Masken (z-index 100) und ohne Mausereignisse: sonst
+          verdeckte er auf Laptop-Bildschirmen die Knöpfe der nächsten Buchungsmaske
+          und schluckte Klicks auf „Buchen“ oder die Büroklammer darunter */}
       {toast && (
         <div
           role="status"
           style={{
+            pointerEvents: 'none',
             position: 'fixed',
             bottom: '1.5rem',
             left: '50%',
@@ -425,7 +434,7 @@ export function Dashboard() {
             borderRadius: '8px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
             fontSize: '0.9rem',
-            zIndex: 1200,
+            zIndex: 90,
             maxWidth: '90vw',
           }}
         >
@@ -484,18 +493,14 @@ function AnfangsbestandModal({
       .catch(() => setExisting({ exists: false, booking: null }));
   }, [schoolId, isAdmin]);
 
-  const parsedAmount = (() => {
-    const t = amount.trim().replace(',', '.');
-    if (t === '') return NaN;
-    const n = parseFloat(t);
-    return Number.isFinite(n) && n >= 0 ? n : NaN;
-  })();
-  const amountInvalid = Number.isNaN(parsedAmount);
+  // "1.250,00" ist 1250 Euro — früher wurde daraus 1,25
+  const amountCents = parseAmountCents(amount);
+  const amountInvalid = amountCents === null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (amountInvalid) {
-      setError('Bitte einen gültigen Betrag eingeben (0,00 ist erlaubt).');
+    if (amountCents === null) {
+      setError('Bitte einen gültigen Betrag eingeben, zum Beispiel 1.250,00 (0,00 ist erlaubt).');
       return;
     }
     if (!bookingDate) {
@@ -510,7 +515,7 @@ function AnfangsbestandModal({
     try {
       const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
       await api.post(`/bookings${schoolParam}`, {
-        amount: parsedAmount,
+        amount: centsToEuros(amountCents),
         debitCredit: 'S',
         accountId: kasseAccount.id,
         counterAccountId: anfangsbestandAccount.id,
@@ -556,7 +561,7 @@ function AnfangsbestandModal({
           <div className="form-group">
             <label htmlFor="anfangBookingDate">Buchungsdatum</label>
             <input id="anfangBookingDate" type="date" className="form-control" value={bookingDate}
-              max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
+              min={MIN_BOOKING_DATE} max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
           </div>
           <div className="form-group">
             <label htmlFor="anfangAmount">Anfangsbestand (EUR)</label>
@@ -603,7 +608,7 @@ function NewBookingModal({
   schoolId: string; isAdmin: boolean; kasseAccounts: Account[]; gegenAccounts: Account[];
   costCenters: CostCenter[]; dateMode: 'TODAY' | 'EMPTY';
   belegarten: BelegartDto[]; belegartDefaultId: string | null; belegartRequired: boolean;
-  onClose: () => void; onCreated: (opts: { noReceiptUploaded: boolean }) => void;
+  onClose: () => void; onCreated: (opts: { noReceiptUploaded: boolean; uploadError?: string }) => void;
 }) {
   const [mode, setMode] = useState<'single' | 'split' | 'eigenbeleg'>(initialMode);
   // Das Eigenbeleg-Formular wird erst eingehängt, wenn sein Reiter zum ersten Mal gezeigt wird
@@ -647,9 +652,11 @@ function NewBookingModal({
     return () => { cancelled = true; };
   }, [counterAccountId, schoolId, isAdmin]);
 
-  const splitSum = splitLines.reduce((s, l) => s + (parseFloat(l.amount.replace(',', '.')) || 0), 0);
-  const totalAmount = parseFloat(amount.replace(',', '.')) || 0;
-  const splitRemaining = totalAmount - splitSum;
+  // In ganzen Cent gerechnet: "1.250,00" ist 125000, nicht 1,25 €
+  const totalCents = parseAmountCents(amount);
+  const splitCents = splitLines.map((l) => parseAmountCents(l.amount));
+  const splitSumCents = splitCents.reduce<number>((sum, cents) => sum + (cents ?? 0), 0);
+  const splitRemainingCents = (totalCents ?? 0) - splitSumCents;
 
   const updateSplitLine = (idx: number, field: keyof SplitLine, value: string) => {
     setSplitLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
@@ -680,15 +687,28 @@ function NewBookingModal({
       setError('Bitte eine Belegart auswählen.');
       return;
     }
+    if (totalCents === null) {
+      setError('Bitte einen gültigen Betrag eingeben, zum Beispiel 12,50 oder 1.250,00.');
+      return;
+    }
+    if (mode === 'split') {
+      if (splitCents.some((cents) => cents === null || cents === 0)) {
+        setError('Bitte in jeder Position einen gültigen Betrag eingeben, zum Beispiel 12,50.');
+        return;
+      }
+      if (splitRemainingCents !== 0) {
+        setError(`Bitte alle Beträge aufteilen. Noch ${formatCents(splitRemainingCents)} offen.`);
+        return;
+      }
+    }
     setError(''); setLoading(true);
+    const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
+
+    let createdBookingId: string | null = null;
     try {
-      const schoolParam = isAdmin ? `?schoolId=${schoolId}` : '';
-
-      let createdBookingId: string | null = null;
-
       if (mode === 'single') {
         const created = await api.post<{ id: string }>(`/bookings${schoolParam}`, {
-          amount: parseFloat(amount.replace(',', '.')),
+          amount: centsToEuros(totalCents),
           debitCredit,
           accountId,
           counterAccountId,
@@ -698,18 +718,13 @@ function NewBookingModal({
         });
         createdBookingId = created.id ?? null;
       } else {
-        if (Math.abs(splitRemaining) > 0.005) {
-          setError(`Bitte alle Beträge aufteilen. Noch ${splitRemaining.toFixed(2)} EUR offen.`);
-          setLoading(false);
-          return;
-        }
         const created = await api.post<{ id: string }[]>(`/bookings/split${schoolParam}`, {
-          totalAmount: parseFloat(amount.replace(',', '.')),
+          totalAmount: centsToEuros(totalCents),
           debitCredit,
           accountId,
           bookingDate,
-          lines: splitLines.map((l) => ({
-            amount: parseFloat(l.amount.replace(',', '.')),
+          lines: splitLines.map((l, i) => ({
+            amount: centsToEuros(splitCents[i] ?? 0),
             counterAccountId: l.counterAccountId,
             costCenterId: l.costCenterId || undefined,
             description: l.description,
@@ -719,47 +734,59 @@ function NewBookingModal({
         // Belege haengen an der ersten Zeile der Splittgruppe.
         createdBookingId = created[0]?.id ?? null;
       }
-
-      // Belege hochladen (an Master-Zeile der Split- bzw. an Single-Buchung)
-      let uploaded = false;
-      if (createdBookingId && pendingFiles.length > 0) {
-        const extra: Record<string, string> = {};
-        if (belegartId) extra.belegartId = belegartId;
-        await api.upload(`/receipts/booking/${createdBookingId}`, pendingFiles, extra);
-        uploaded = true;
-      }
-
-      onCreated({ noReceiptUploaded: !uploaded });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Buchung fehlgeschlagen');
-    } finally { setLoading(false); }
+      setLoading(false);
+      return;
+    }
+
+    // Die Buchung steht. Scheitert jetzt nur noch der Beleg, darf das nicht wie
+    // eine gescheiterte Buchung aussehen — der zweite Klick buchte sonst doppelt.
+    let uploadError: string | undefined;
+    if (createdBookingId && pendingFiles.length > 0) {
+      const extra: Record<string, string> = {};
+      if (belegartId) extra.belegartId = belegartId;
+      try {
+        await api.upload(`/receipts/booking/${createdBookingId}`, pendingFiles, extra);
+      } catch (uploadErr) {
+        uploadError = uploadErr instanceof Error ? uploadErr.message : 'Upload fehlgeschlagen';
+      }
+    }
+
+    setLoading(false);
+    onCreated({ noReceiptUploaded: pendingFiles.length === 0, uploadError });
   };
+
+  // Solange irgendeine Buchung unterwegs ist, bleibt der Reiter, wo er ist —
+  // sonst schlösse eine fertige Einfachbuchung die Maske samt laufendem Eigenbeleg.
+  const booking = eigenbelegBooking || loading;
 
   // flex-wrap: mit dem dritten Reiter passen die Knöpfe auf schmalen Bildschirmen nicht mehr in eine Zeile
   const modeToggle = (
     <div className="flex-gap flex-wrap mb-3">
       <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : 'btn-outline'}`}
-        disabled={eigenbelegBooking} onClick={() => setMode('single')}>
+        disabled={booking} onClick={() => setMode('single')}>
         Einfachbuchung
       </button>
       <button className={`btn btn-sm ${mode === 'split' ? 'btn-primary' : 'btn-outline'}`}
-        disabled={eigenbelegBooking} onClick={() => setMode('split')}>
+        disabled={booking} onClick={() => setMode('split')}>
         Splittbuchung
       </button>
       <button className={`btn btn-sm ${mode === 'eigenbeleg' ? 'btn-primary' : 'btn-outline'}`}
-        disabled={eigenbelegBooking} onClick={() => { setMode('eigenbeleg'); setEigenbelegOpened(true); }}>
+        disabled={booking} onClick={() => { setMode('eigenbeleg'); setEigenbelegOpened(true); }}>
         Eigenbeleg
       </button>
     </div>
   );
 
-  // Der Eigenbeleg ist gebucht: egal wie die Maske geschlossen wird, das
-  // Journal muss neu laden.
+  // Der Eigenbeleg ist gebucht: das Journal muss neu laden. Geschlossen wird
+  // nur über „Fertig“ — ein Klick daneben (etwa der zweite eines Doppelklicks
+  // auf „Buchen“) liesse die Bestätigung samt Hinweisen sonst ungelesen verschwinden.
   if (eigenbelegDone) {
     const finish = () => onCreated({ noReceiptUploaded: false });
     return (
-      <div className="modal-overlay" onClick={finish} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '720px' }}>
+      <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div className="modal" style={{ maxWidth: '720px' }}>
           <EigenbelegDone result={eigenbelegDone} onClose={finish} />
         </div>
       </div>
@@ -770,9 +797,12 @@ function NewBookingModal({
   // die Eingaben nicht verloren, wenn jemand den Reiter wechselt.
   const eigenbelegTab = mode === 'eigenbeleg';
 
+  // Kein Schließen per Klick neben die Maske: auch das Loslassen der Maus
+  // beim Markieren von Text löst dort einen Klick aus, und alle Eingaben
+  // beider Reiter wären weg. Geschlossen wird über „Abbrechen“.
   return (
-    <div className="modal-overlay" onClick={eigenbelegBooking ? undefined : onClose} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={mode === 'single' ? undefined : { maxWidth: '720px' }}>
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className="modal" style={mode === 'single' ? undefined : { maxWidth: '720px' }}>
         <h2 id="modal-title">Neue Buchung</h2>
 
         {modeToggle}
@@ -792,8 +822,6 @@ function NewBookingModal({
             />
           </div>
         )}
-
-        {error && !eigenbelegTab && <div className="alert alert-error" role="alert">{error}</div>}
 
         <form onSubmit={handleSubmit} hidden={eigenbelegTab}>
           {/* Common header fields */}
@@ -816,7 +844,7 @@ function NewBookingModal({
             <div className="form-group">
               <label htmlFor="bookingDate">Buchungsdatum</label>
               <input id="bookingDate" type="date" className="form-control" value={bookingDate}
-                max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
+                min={MIN_BOOKING_DATE} max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
             </div>
             <div className="form-group">
               <label htmlFor="accountId">Kassenkonto</label>
@@ -943,17 +971,17 @@ function NewBookingModal({
               }}>
                 <div>
                   <span className="text-light">Aufgeteilt:</span>{' '}
-                  <strong style={{ color: Math.abs(splitRemaining) < 0.005 ? 'var(--color-success)' : 'var(--color-error)' }}>
-                    {splitSum.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                  <strong style={{ color: splitRemainingCents === 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+                    {formatCents(splitSumCents)}
                   </strong>
-                  <span className="text-light"> / {totalAmount.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}</span>
+                  <span className="text-light"> / {formatCents(totalCents ?? 0)}</span>
                 </div>
                 <div>
-                  {Math.abs(splitRemaining) < 0.005 ? (
+                  {splitRemainingCents === 0 ? (
                     <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{'\u2713'} Vollständig aufgeteilt</span>
                   ) : (
                     <span style={{ color: 'var(--color-error)', fontWeight: 600 }}>
-                      Offen: {splitRemaining.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })}
+                      Offen: {formatCents(splitRemainingCents)}
                     </span>
                   )}
                 </div>
@@ -990,9 +1018,12 @@ function NewBookingModal({
             />
           </div>
 
+          {/* Direkt über den Knöpfen: oben in der scrollenden Maske sähe man die Meldung auf kleinen Bildschirmen nicht */}
+          {error && <div className="alert alert-error" role="alert" style={{ marginTop: '1rem' }}>{error}</div>}
+
           <div className="modal-actions">
-            <button type="button" className="btn btn-outline" onClick={onClose}>Abbrechen</button>
-            <button type="submit" className="btn btn-primary" disabled={loading || (mode === 'split' && Math.abs(splitRemaining) > 0.005)}>
+            <button type="button" className="btn btn-outline" disabled={loading} onClick={onClose}>Abbrechen</button>
+            <button type="submit" className="btn btn-primary" disabled={loading || (mode === 'split' && splitRemainingCents !== 0)}>
               {loading ? 'Buche...' : mode === 'split' ? 'Splittbuchung buchen' : 'Buchen'}
             </button>
           </div>

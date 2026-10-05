@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../api/client';
+import { MIN_BOOKING_DATE, parseAmountCents } from '../utils/bookingInput';
 import { ReceiptUpload } from './ReceiptUpload';
 
 export interface EigenbelegAccount {
@@ -79,11 +80,10 @@ function getTodayString(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-/** "1,50" oder "1.5" in ganze Cent — null, wenn das kein Betrag mit höchstens zwei Nachkommastellen ist. */
+/** Einzelpreis in ganze Cent ("1,50", "1.250,00") — null, wenn das kein Betrag unter 100.000 € ist. */
 function parseCents(text: string): number | null {
-  const match = /^(\d{1,5})(?:[.,](\d{1,2}))?$/.exec(text.trim());
-  if (!match) return null;
-  return parseInt(match[1], 10) * 100 + parseInt((match[2] ?? '').padEnd(2, '0'), 10);
+  const cents = parseAmountCents(text);
+  return cents !== null && cents < 10_000_000 ? cents : null;
 }
 
 function parseQuantity(text: string): number | null {
@@ -314,8 +314,6 @@ export function EigenbelegForm({
             : 'Bitte an die Verwaltung wenden.'}
         </div>
       )}
-      {error && <div className="alert alert-error" role="alert">{error}</div>}
-
       <form onSubmit={handleSubmit} onKeyDown={keepEnterFromBooking}>
         <div className="eb-group" style={{ marginTop: 0 }}>Angaben auf dem Beleg</div>
         <div className="grid-2">
@@ -330,7 +328,7 @@ export function EigenbelegForm({
           <div className="form-group">
             <label htmlFor="ebDate">Belegdatum</label>
             <input id="ebDate" type="date" className="form-control" value={bookingDate}
-              max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
+              min={MIN_BOOKING_DATE} max={getTodayString()} onChange={(e) => setBookingDate(e.target.value)} required />
           </div>
         </div>
 
@@ -456,6 +454,10 @@ export function EigenbelegForm({
               placeholder="Vorschlag aus den Positionen" autoComplete="off" />
           </div>
         </div>
+
+        {/* Direkt über den Knöpfen: oben in der scrollenden Maske sähe man die Meldung auf
+            Laptop-Bildschirmen nicht — auch nicht „Keine Antwort vom Server … erst dann noch einmal buchen“ */}
+        {error && <div className="alert alert-error" role="alert" style={{ marginTop: '1rem' }}>{error}</div>}
 
         <div className="modal-actions">
           <button type="button" className="btn btn-outline" disabled={busy === 'book'} onClick={onCancel}>Abbrechen</button>
