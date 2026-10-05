@@ -32,7 +32,9 @@ export class ApiError extends Error {
  * des Servers.
  */
 async function ensureOk(res: Response): Promise<void> {
-  if (res.status === 401) {
+  // Bei der Anmeldung selbst heißt 401 "Benutzername oder Passwort falsch" —
+  // das soll als Meldung stehen bleiben, statt die Anmeldeseite neu zu laden.
+  if (res.status === 401 && !res.url.endsWith('/auth/login')) {
     setToken(null);
     window.location.href = '/login';
     throw new ApiError('Nicht authentifiziert', 401);
@@ -40,7 +42,9 @@ async function ensureOk(res: Response): Promise<void> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.error || `Fehler: ${res.status}`, res.status);
+    // 413 ohne Meldung kommt vom Proxy vor dem Kassenbuch: die Anfrage war zu groß
+    const fallback = res.status === 413 ? 'Die Datei ist zu groß.' : `Fehler: ${res.status}`;
+    throw new ApiError(body.error || fallback, res.status);
   }
 }
 

@@ -13,6 +13,12 @@ vi.mock('../config', () => ({
   },
 }));
 
+// authenticate fragt bei jeder Anfrage nach, ob das Benutzerkonto noch aktiv ist
+const findUser = vi.hoisted(() => vi.fn());
+vi.mock('../prismaClient', () => ({
+  prisma: { user: { findUnique: findUser } },
+}));
+
 function createMockRequest(overrides: Partial<Request> = {}): Request {
   return {
     headers: {},
@@ -103,7 +109,8 @@ describe('auth middleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('should accept valid token and set req.user', () => {
+    it('should accept valid token and set req.user', async () => {
+      findUser.mockResolvedValue({ isActive: true });
       const payload: AuthPayload = {
         userId: 'user-1',
         username: 'admin',
@@ -118,8 +125,9 @@ describe('auth middleware', () => {
       const res = createMockResponse();
       const next = vi.fn();
 
-      authenticate(req, res, next);
+      await authenticate(req, res, next);
 
+      expect(findUser).toHaveBeenCalledWith({ where: { id: 'user-1' }, select: { isActive: true } });
       expect(next).toHaveBeenCalledOnce();
       expect(req.user).toBeDefined();
       expect(req.user!.userId).toBe('user-1');
@@ -128,7 +136,8 @@ describe('auth middleware', () => {
       expect(req.user!.schoolId).toBeNull();
     });
 
-    it('should accept valid token for USER role with schoolId', () => {
+    it('should accept valid token for USER role with schoolId', async () => {
+      findUser.mockResolvedValue({ isActive: true });
       const payload: AuthPayload = {
         userId: 'user-2',
         username: 'lehrer',
@@ -143,11 +152,46 @@ describe('auth middleware', () => {
       const res = createMockResponse();
       const next = vi.fn();
 
-      authenticate(req, res, next);
+      await authenticate(req, res, next);
 
       expect(next).toHaveBeenCalledOnce();
       expect(req.user!.role).toBe('USER');
       expect(req.user!.schoolId).toBe('school-abc');
+    });
+
+    // Vorher galt ein Token bis zu acht Stunden weiter, auch wenn das Konto
+    // inzwischen deaktiviert war.
+    it('weist ein gueltiges Token ab, wenn das Benutzerkonto deaktiviert oder geloescht ist', async () => {
+      const token = jwt.sign({ userId: 'user-3', username: 'kasse.ges', role: 'USER', schoolId: 'school-1' }, 'test-secret-key', { expiresIn: 3600 });
+
+      for (const user of [{ isActive: false }, null]) {
+        findUser.mockResolvedValue(user);
+        const req = createMockRequest({ headers: { authorization: `Bearer ${token}` } as Record<string, string> });
+        const res = createMockResponse();
+        const next = vi.fn();
+
+        await authenticate(req, res, next);
+
+        expect(res.statusCode).toBe(401);
+        expect(res.body).toEqual({ error: 'Benutzerkonto ist deaktiviert' });
+        expect(next).not.toHaveBeenCalled();
+        expect(req.user).toBeUndefined();
+      }
+    });
+
+    it('antwortet mit 500, wenn die Datenbank nicht erreichbar ist, und laesst niemanden durch', async () => {
+      findUser.mockRejectedValue(new Error('Verbindung verloren'));
+      const token = jwt.sign({ userId: 'user-1', username: 'admin', role: 'ADMIN', schoolId: null }, 'test-secret-key', { expiresIn: 3600 });
+      const req = createMockRequest({ headers: { authorization: `Bearer ${token}` } as Record<string, string> });
+      const res = createMockResponse();
+      const next = vi.fn();
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await authenticate(req, res, next);
+
+      expect(res.statusCode).toBe(500);
+      expect(next).not.toHaveBeenCalled();
+      quiet.mockRestore();
     });
 
     it('should reject token signed with wrong secret', () => {
