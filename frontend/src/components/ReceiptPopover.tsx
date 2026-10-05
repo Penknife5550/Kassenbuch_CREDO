@@ -60,6 +60,19 @@ export function ReceiptPopover({
   // Anhängen geht immer, löschen nach dem Tagesabschluss nur noch für die Verwaltung
   const canDelete = !isFinalized || isAdmin;
 
+  // Hängt an der Buchung ein im Kassenbuch erstellter Eigenbeleg, gehört ein
+  // weiterer Beleg — etwa der unterschriebene Ausdruck — zu ihm. Seine Belegart
+  // wird vorgeschlagen, auch wenn sie in der Liste der Schule (noch) fehlt.
+  const eigenbelegBelegart = receipts?.find((r) => r.generated)?.belegart ?? null;
+  const belegartOptions: Array<{ id: string; label: string }> = [
+    ...belegarten.filter((b) => b.isActive),
+    ...(eigenbelegBelegart && !belegarten.some((b) => b.isActive && b.id === eigenbelegBelegart.id) ? [eigenbelegBelegart] : []),
+  ];
+  const openAdd = () => {
+    setAddBelegartId(eigenbelegBelegart?.id ?? defaultBelegartId ?? '');
+    setShowAdd(true);
+  };
+
   useEffect(() => {
     api.get<ReceiptDto[]>(`/receipts/booking/${bookingId}`)
       .then(setReceipts)
@@ -147,7 +160,7 @@ export function ReceiptPopover({
         {receipts && receipts.length === 0 && !showAdd && (
           <div className="text-center" style={{ padding: '1rem 0' }}>
             <p className="text-light" style={{ marginBottom: '0.75rem' }}>Keine Belege vorhanden.</p>
-            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            <button className="btn btn-primary" onClick={openAdd}>
               + Beleg hochladen
             </button>
           </div>
@@ -190,7 +203,7 @@ export function ReceiptPopover({
 
         {receipts && receipts.length > 0 && !showAdd && (
           <div style={{ marginTop: '0.75rem' }}>
-            <button className="btn btn-sm btn-outline" onClick={() => setShowAdd(true)}>
+            <button className="btn btn-sm btn-outline" onClick={openAdd}>
               + Beleg hinzufügen
             </button>
           </div>
@@ -203,7 +216,7 @@ export function ReceiptPopover({
               <select id="addBelegart" className="form-control" value={addBelegartId}
                 onChange={(e) => setAddBelegartId(e.target.value)}>
                 <option value="">— bitte wählen —</option>
-                {belegarten.filter(b => b.isActive).map(b => (
+                {belegartOptions.map(b => (
                   <option key={b.id} value={b.id}>{b.label}</option>
                 ))}
               </select>

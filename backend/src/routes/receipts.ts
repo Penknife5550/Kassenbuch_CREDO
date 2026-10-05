@@ -151,7 +151,7 @@ receiptsRouter.post(
         return;
       }
 
-      const belegartId = typeof req.body?.belegartId === 'string' && req.body.belegartId.length > 0
+      let belegartId: string | null = typeof req.body?.belegartId === 'string' && req.body.belegartId.length > 0
         ? req.body.belegartId
         : null;
 
@@ -162,6 +162,14 @@ receiptsRouter.post(
           res.status(400).json({ error: 'Belegart passt nicht zur Schule der Buchung.' });
           return;
         }
+      } else {
+        // Ein Scan zum Eigenbeleg — etwa der unterschriebene Ausdruck — bekommt
+        // dessen Belegart, sonst ginge er mit leerer Dokumentart ins DMS.
+        const eigenbeleg = await prisma.eigenbeleg.findUnique({
+          where: { bookingId: booking.id },
+          select: { receipt: { select: { belegartId: true } } },
+        });
+        belegartId = eigenbeleg?.receipt.belegartId ?? null;
       }
 
       const created = [];

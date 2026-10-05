@@ -33,13 +33,19 @@ export function detectFileType(buffer: Buffer): DetectedFile | null {
 
 // Multer mit In-Memory-Storage — wir validieren und schreiben selbst auf Disk,
 // damit Magic-Byte-Check vor dem Persistieren laufen kann.
-export const receiptUpload = multer({
+// multer kennt defParamCharset, die Typen in @types/multer noch nicht
+const uploadOptions: multer.Options & { defParamCharset: string } = {
   storage: multer.memoryStorage(),
+  // Browser schicken Dateinamen als UTF-8. Mit der Voreinstellung latin1 wurde
+  // aus "Übungsheft Straße.pdf" Zeichensalat mit Steuerzeichen — in der
+  // Belegliste und als Abbruchgrund im DMS-Export.
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_BYTES,
     files: config.maxReceiptFilesPerUpload,
   },
-});
+};
+export const receiptUpload = multer(uploadOptions);
 
 export interface StoredReceipt {
   storagePath: string;   // relativ zu config.uploadDir
@@ -67,7 +73,13 @@ export async function storeReceipt(
   const absolutePath = join(config.uploadDir, relativePath);
 
   await fs.mkdir(dirname(absolutePath), { recursive: true });
-  await fs.writeFile(absolutePath, buffer);
+  try {
+    await fs.writeFile(absolutePath, buffer);
+  } catch (err) {
+    // Eine halb geschriebene Datei (Platte voll) gehoert zu keinem Beleg — sonst bliebe sie verwaist liegen
+    await fs.unlink(absolutePath).catch(() => undefined);
+    throw err;
+  }
 
   const sha256 = createHash('sha256').update(buffer).digest('hex');
 
