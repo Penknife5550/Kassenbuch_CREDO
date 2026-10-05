@@ -18,10 +18,12 @@ import {
   calculateCashBalanceTx,
   resolveBookingDate,
   createBookingInTx,
+  assertAccountsUsable,
   assertCostCentersUsable,
   assertDayOpen,
   assertNotStornoed,
   bookingErrorToResponse,
+  isWriteConflict,
   retryOnWriteConflict,
   dayClosedMessage,
   COST_CENTER_GONE,
@@ -169,6 +171,22 @@ describe('bookingService', () => {
     it('weist ein Datum ab, das es nicht gibt', () => {
       expect(resolveBookingDate('2024-13-45')).toEqual({ ok: false, error: 'Ungültiges Buchungsdatum' });
     });
+
+    // Vorher wurde der 30. Februar stillschweigend zum 2. Maerz.
+    it('weist einen Tag ab, den es in diesem Monat nicht gibt, und laesst den Schalttag zu', () => {
+      expect(resolveBookingDate('2026-02-30')).toEqual({ ok: false, error: 'Ungültiges Buchungsdatum' });
+      expect(resolveBookingDate('2025-02-29')).toEqual({ ok: false, error: 'Ungültiges Buchungsdatum' });
+      expect(resolveBookingDate('2024-02-29').ok).toBe(true);
+    });
+
+    // Ein zweistellig getipptes Jahr kommt als "0026" an.
+    it('weist ein Jahr vor 2000 ab', () => {
+      expect(resolveBookingDate('0026-10-02')).toEqual({
+        ok: false,
+        error: 'Das Buchungsdatum liegt vor dem Jahr 2000. Bitte das Datum prüfen.',
+      });
+      expect(resolveBookingDate('2000-01-01').ok).toBe(true);
+    });
   });
 
   describe('createBookingInTx', () => {
@@ -183,15 +201,28 @@ describe('bookingService', () => {
       createdById: 'user-1',
     };
 
-    function makeTx(balance: number, state: { closedThrough?: Date; costCenters?: Array<{ id: string; isActive: boolean }> } = {}) {
+    function makeTx(balance: number, state: {
+      closedThrough?: Date; costCenters?: Array<{ id: string; isActive: boolean }>; activeAccounts?: number;
+    } = {}) {
       return {
         $queryRaw: vi.fn().mockResolvedValue([{ balance: new Prisma.Decimal(balance) }]),
         receiptSequence: { update: vi.fn().mockResolvedValue({ lastNumber: 43 }) },
         booking: { create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'booking-1', ...data })) },
         dailyClosing: { findFirst: vi.fn().mockResolvedValue(state.closedThrough ? { closingDate: state.closedThrough } : null) },
         costCenter: { findMany: vi.fn().mockResolvedValue(state.costCenters ?? []) },
+        account: { count: vi.fn().mockResolvedValue(state.activeAccounts ?? 2) },
       };
     }
+
+    // Ein vor der Deaktivierung geoeffnetes Fenster kennt das Konto noch.
+    it('bucht nicht auf ein deaktiviertes Konto und zieht dann keine Belegnummer', async () => {
+      const tx = makeTx(250, { activeAccounts: 1 });
+
+      await expect(createBookingInTx(tx as any, input)).rejects.toThrow(`GONE:${ACCOUNT_GONE}`);
+      expect(tx.account.count).toHaveBeenCalledWith({ where: { id: { in: ['kasse-1', 'gegen-1'] }, isActive: true } });
+      expect(tx.receiptSequence.update).not.toHaveBeenCalled();
+      expect(tx.booking.create).not.toHaveBeenCalled();
+    });
 
     it('bucht eine Ausgabe mit der naechsten Belegnummer', async () => {
       const tx = makeTx(250);
@@ -290,8 +321,18 @@ describe('bookingService', () => {
       const friday = txWith(new Date('2024-03-15'));
 
       await expect(assertDayOpen(friday as any, 'school-1', new Date('2024-03-13'))).rejects.toThrow(
-        'CLOSED:Die Kasse ist bis einschließlich 15.03.2024 abgeschlossen. Buchungen sind erst mit einem späteren Datum möglich.',
+        'CLOSED:Die Kasse ist bis einschließlich 15.03.2024 abgeschlossen. Bitte ein späteres Buchungsdatum wählen.',
       );
+    });
+
+    // Ist heute schon abgeschlossen, laege jedes spaetere Datum in der Zukunft.
+    it('sagt bei einem Abschluss von heute, dass erst morgen wieder gebucht werden kann', () => {
+      const today = new Date('2026-10-05T00:00:00Z');
+
+      expect(dayClosedMessage(new Date('2026-10-05T00:00:00Z'), today))
+        .toBe('Die Kasse ist für heute bereits abgeschlossen. Buchungen sind erst ab morgen wieder möglich.');
+      expect(dayClosedMessage(new Date('2026-10-02T00:00:00Z'), today))
+        .toBe('Die Kasse ist bis einschließlich 02.10.2026 abgeschlossen. Bitte ein späteres Buchungsdatum wählen.');
     });
 
     it('bricht mit der Meldung des Aufrufers ab, wenn er eine mitgibt', async () => {
@@ -321,6 +362,21 @@ describe('bookingService', () => {
 
       await expect(assertCostCentersUsable(deactivated as any, ['kst-1', 'kst-2'])).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
       await expect(assertCostCentersUsable(missing as any, ['kst-1', 'kst-2'])).rejects.toThrow(`GONE:${COST_CENTER_GONE}`);
+    });
+  });
+
+  describe('assertAccountsUsable', () => {
+    it('zaehlt jedes Konto nur einmal und laesst aktive durch', async () => {
+      const tx = { account: { count: vi.fn().mockResolvedValue(2) } };
+
+      await expect(assertAccountsUsable(tx as any, ['kasse-1', 'erloese', 'erloese'])).resolves.toBeUndefined();
+      expect(tx.account.count).toHaveBeenCalledWith({ where: { id: { in: ['kasse-1', 'erloese'] }, isActive: true } });
+    });
+
+    it('bricht ab, sobald eines der Konten deaktiviert oder verschwunden ist', async () => {
+      const tx = { account: { count: vi.fn().mockResolvedValue(1) } };
+
+      await expect(assertAccountsUsable(tx as any, ['kasse-1', 'erloese'])).rejects.toThrow(`GONE:${ACCOUNT_GONE}`);
     });
   });
 
@@ -373,9 +429,25 @@ describe('bookingService', () => {
       expect(bookingErrorToResponse(account)).toEqual({ status: 400, error: ACCOUNT_GONE });
     });
 
+    // So meldet Prisma 6.19 den Fremdschluessel tatsaechlich (gegen PostgreSQL nachgestellt).
+    it('erkennt die Kostenstelle auch in der Fehlerform von Prisma 6', () => {
+      const costCenter = { code: 'P2003', meta: { modelName: 'Booking', constraint: 'bookings_cost_center_id_fkey' } };
+
+      expect(bookingErrorToResponse(costCenter)).toEqual({ status: 400, error: COST_CENTER_GONE });
+    });
+
     // Vorher lief dieser Fall als "Interner Serverfehler" auf.
     it('macht aus einer parallelen Buchung eine 409 mit Aufforderung zum Wiederholen', () => {
       expect(bookingErrorToResponse({ code: 'P2034' })).toEqual({ status: 409, error: WRITE_CONFLICT });
+    });
+
+    // Bricht PostgreSQL die Transaktion in einer Roh-Abfrage ab (Saldo-Summe),
+    // kommt der Abbruch als P2010 mit dem SQLSTATE an — vorher ein 500er.
+    it('erkennt den Abbruch auch, wenn er in einer Roh-Abfrage passiert', () => {
+      expect(isWriteConflict({ code: 'P2010', meta: { code: '40001', message: 'could not serialize access' } })).toBe(true);
+      expect(isWriteConflict({ code: 'P2010', meta: { code: '40P01' } })).toBe(true);
+      expect(isWriteConflict({ code: 'P2010', meta: { code: '23505' } })).toBe(false);
+      expect(bookingErrorToResponse({ code: 'P2010', meta: { code: '40001' } })).toEqual({ status: 409, error: WRITE_CONFLICT });
     });
 
     it('kennt fremde Fehler nicht — der Aufrufer antwortet mit 500', () => {

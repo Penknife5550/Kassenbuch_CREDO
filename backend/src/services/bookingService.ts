@@ -42,10 +42,25 @@ export async function calculateCashBalanceTx(tx: TxClient, schoolId: string): Pr
   return result[0]?.balance ?? new Prisma.Decimal(0);
 }
 
-/** Meldung fuer eine Buchung in einen abgeschlossenen Tag. Das Datum kommt aus einer DATE-Spalte (UTC-Mitternacht). */
-export function dayClosedMessage(closedThrough: Date): string {
-  const [year, month, day] = closedThrough.toISOString().slice(0, 10).split('-');
-  return `Die Kasse ist bis einschließlich ${day}.${month}.${year} abgeschlossen. Buchungen sind erst mit einem späteren Datum möglich.`;
+/** Heute, 0 Uhr — dieselbe Rechnung wie fuer Buchungs- und Abschlussdatum. */
+function startOfToday(): Date {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+/**
+ * Meldung fuer eine Buchung in einen abgeschlossenen Tag. Das Datum kommt aus
+ * einer DATE-Spalte (UTC-Mitternacht). Ist heute schon abgeschlossen, hilft
+ * kein anderes Datum — ein spaeteres laege in der Zukunft.
+ */
+export function dayClosedMessage(closedThrough: Date, today: Date = startOfToday()): string {
+  const closedKey = closedThrough.toISOString().slice(0, 10);
+  if (closedKey >= today.toISOString().slice(0, 10)) {
+    return 'Die Kasse ist für heute bereits abgeschlossen. Buchungen sind erst ab morgen wieder möglich.';
+  }
+  const [year, month, day] = closedKey.split('-');
+  return `Die Kasse ist bis einschließlich ${day}.${month}.${year} abgeschlossen. Bitte ein späteres Buchungsdatum wählen.`;
 }
 
 /**
@@ -78,17 +93,32 @@ export type BookingDateResult =
   | { ok: false; error: string };
 
 /**
- * Buchungsdatum aus der Anfrage. Fehlt es, gilt heute; ein Datum in der
- * Zukunft wird abgewiesen.
+ * Frueheste Jahreszahl eines Buchungsdatums. Ein zweistellig getipptes Jahr
+ * kommt als "0026" an; gebucht laege es im Jahr 26 und fehlte in jeder
+ * Auswertung, zaehlte aber im Kassenbestand.
+ */
+const MIN_BOOKING_YEAR = 2000;
+
+/**
+ * Buchungsdatum aus der Anfrage (JJJJ-MM-TT). Fehlt es, gilt heute; ein Datum
+ * in der Zukunft, vor dem Jahr 2000 oder ein Tag, den es nicht gibt, wird
+ * abgewiesen.
  */
 export function resolveBookingDate(raw?: string): BookingDateResult {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = startOfToday();
   if (!raw) return { ok: true, date: today };
+
+  const parsed = new Date(raw);
+  // "2026-02-30" wuerde sonst stillschweigend zum 2. Maerz
+  if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
+    return { ok: false, error: 'Ungültiges Buchungsdatum' };
+  }
+  if (parsed.getUTCFullYear() < MIN_BOOKING_YEAR) {
+    return { ok: false, error: 'Das Buchungsdatum liegt vor dem Jahr 2000. Bitte das Datum prüfen.' };
+  }
 
   const date = new Date(raw);
   date.setHours(0, 0, 0, 0);
-  if (isNaN(date.getTime())) return { ok: false, error: 'Ungültiges Buchungsdatum' };
   if (date > today) return { ok: false, error: 'Buchungsdatum darf nicht in der Zukunft liegen.' };
   return { ok: true, date };
 }
@@ -107,10 +137,10 @@ export interface NewBooking {
 }
 
 /**
- * Legt eine Einzelbuchung in einer laufenden Transaktion an: Kostenstelle
- * nutzbar, Tag nicht abgeschlossen, Saldo-Pruefung bei Ausgaben, naechste
- * Belegnummer, Buchung. Die Transaktion muss Serializable laufen, sonst sind
- * die Pruefungen gegen parallele Buchungen und Abschluesse nicht dicht.
+ * Legt eine Einzelbuchung in einer laufenden Transaktion an: Konten und
+ * Kostenstelle nutzbar, Tag nicht abgeschlossen, Saldo-Pruefung bei Ausgaben,
+ * naechste Belegnummer, Buchung. Die Transaktion muss Serializable laufen,
+ * sonst sind die Pruefungen gegen parallele Buchungen und Abschluesse nicht dicht.
  *
  * Alle Pruefungen stehen hier und nicht davor, damit ein Wiederholungsversuch
  * (retryOnWriteConflict) sie erneut durchlaeuft.
@@ -119,6 +149,7 @@ export interface NewBooking {
  * bookingErrorToResponse macht daraus die Antwort.
  */
 export async function createBookingInTx(tx: TxClient, input: NewBooking) {
+  await assertAccountsUsable(tx, [input.accountId, input.counterAccountId]);
   await assertCostCentersUsable(tx, [input.costCenterId]);
   await assertDayOpen(tx, input.schoolId, input.bookingDate);
 
@@ -194,26 +225,50 @@ export async function assertCostCentersUsable(tx: TxClient, ids: Array<string | 
 export const ACCOUNT_GONE = 'Ein ausgewähltes Konto ist nicht mehr verfügbar. Bitte laden Sie die Seite neu.';
 
 /**
+ * Stellt IN der Transaktion sicher, dass alle Konten existieren und aktiv
+ * sind — dieselbe Regel wie fuer Kostenstellen. Ein vor der Deaktivierung
+ * geoeffnetes Fenster kennt das Konto noch; ohne Pruefung kaeme es zurueck in
+ * Journal, DATEV und Eigenbeleg. Wirft `GONE:<Meldung>`.
+ */
+export async function assertAccountsUsable(tx: TxClient, ids: string[]): Promise<void> {
+  const unique = [...new Set(ids)];
+  const active = await tx.account.count({ where: { id: { in: unique }, isActive: true } });
+  if (active !== unique.length) throw new Error(`GONE:${ACCOUNT_GONE}`);
+}
+
+/**
  * Faengt den Sekundenbruchteil zwischen Pruefung und INSERT ab: verschwindet
  * eine Kostenstelle oder ein Konto genau dann, weist die Datenbank das INSERT
  * per Fremdschluessel ab (P2003). Ohne diesen Zweig saehe der Anwender
  * ausgerechnet dort einen nichtssagenden 500er.
+ *
+ * Prisma 6 nennt die verletzte Regel in meta.constraint, aeltere Versionen in
+ * meta.field_name — gesucht wird deshalb in allem, was meta enthaelt.
  */
 function foreignKeyMessage(err: unknown): string | null {
   if (!err || typeof err !== 'object' || !('code' in err) || err.code !== 'P2003') return null;
-  const field = String((err as { meta?: { field_name?: unknown } }).meta?.field_name ?? '');
-  return field.includes('cost_center') ? COST_CENTER_GONE : ACCOUNT_GONE;
+  const meta = JSON.stringify((err as { meta?: unknown }).meta ?? {});
+  return meta.includes('cost_center') ? COST_CENTER_GONE : ACCOUNT_GONE;
 }
 
 export const WRITE_CONFLICT = 'Gleichzeitig wurde eine andere Buchung gespeichert. Bitte noch einmal buchen.';
+
+/** SQLSTATE fuer gescheiterte Serialisierung und Deadlock: nichts geschrieben, ein neuer Versuch hilft. */
+const RETRYABLE_SQLSTATES = new Set(['40001', '40P01']);
 
 /**
  * P2034: zwei Buchungen derselben Schule trafen im selben Moment ein. Beide
  * greifen nach der naechsten Belegnummer; PostgreSQL bricht bei Serializable
  * eine der beiden Transaktionen ab, ohne dass sie etwas geschrieben hat.
+ *
+ * Trifft der Abbruch eine Roh-Abfrage ($queryRaw, etwa die Saldo-Summe),
+ * meldet Prisma ihn als P2010 mit dem SQLSTATE in meta.code.
  */
 export function isWriteConflict(err: unknown): boolean {
-  return !!err && typeof err === 'object' && 'code' in err && err.code === 'P2034';
+  if (!err || typeof err !== 'object' || !('code' in err)) return false;
+  if (err.code === 'P2034') return true;
+  const sqlState = (err as { meta?: { code?: unknown } }).meta?.code;
+  return err.code === 'P2010' && RETRYABLE_SQLSTATES.has(String(sqlState));
 }
 
 const WRITE_CONFLICT_ATTEMPTS = 5;

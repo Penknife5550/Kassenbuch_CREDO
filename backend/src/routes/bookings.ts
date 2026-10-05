@@ -7,7 +7,7 @@ import { authenticate, getSchoolScope } from '../middleware/auth';
 import { logAudit } from '../services/auditService';
 import {
   getNextReceiptNumber, calculateCashBalance, calculateCashBalanceTx,
-  resolveBookingDate, createBookingInTx, assertCostCentersUsable, assertDayOpen, assertNotStornoed,
+  resolveBookingDate, createBookingInTx, assertAccountsUsable, assertCostCentersUsable, assertDayOpen, assertNotStornoed,
   bookingErrorToResponse,
 } from '../services/bookingService';
 import { generateKassenbuchPdf } from '../services/pdfService';
@@ -369,8 +369,9 @@ bookingsRouter.post('/split', async (req: Request, res: Response) => {
     const splitGroupId = crypto.randomUUID();
 
     const bookings = await prisma.$transaction(async (tx) => {
-      // Kostenstellen und Tagesabschluss in der Transaktion pruefen — eine
-      // Pruefung davor koennte bis zur Buchung schon ueberholt sein.
+      // Konten, Kostenstellen und Tagesabschluss in der Transaktion pruefen —
+      // eine Pruefung davor koennte bis zur Buchung schon ueberholt sein.
+      await assertAccountsUsable(tx, [parsed.data.accountId, ...parsed.data.lines.map((l) => l.counterAccountId)]);
       await assertCostCentersUsable(tx, parsed.data.lines.map((l) => l.costCenterId));
       await assertDayOpen(tx, schoolId, bookingDate);
 
