@@ -13,6 +13,13 @@ import {
   getMappingCached,
 } from './dmsMappingService';
 import { buildSpcPayload, renderQrPng } from './qrService';
+import { toPdfText } from './pdfText';
+
+// Alle Texte aus Buchungen, Belegen und Stammdaten laufen durch toPdfText: die
+// Standardschriften von pdf-lib werfen bei jedem Zeichen ausserhalb des
+// westeuropaeischen Zeichensatzes, und der ganze Export des Zeitraums endete
+// mit einem Serverfehler — etwa wegen eines aus einer PDF-Liste kopierten
+// Buchungstexts oder eines Namens wie "Ayşe". Der QR-Inhalt bleibt unveraendert.
 
 // ─── CREDO-Stil (synchron zu pdfService.ts) ────────────────────────────────
 const CREDO_PRIMARY = rgb(0x57 / 255, 0x57 / 255, 0x56 / 255);
@@ -181,7 +188,7 @@ async function renderCover(
   const schoolList = opts.filter.schoolIds.length
     ? opts.filter.schoolIds.map(id => opts.schoolsById[id]?.name).filter(Boolean).join(', ')
     : 'Alle Mandanten';
-  page.drawText(schoolList, {
+  page.drawText(toPdfText(schoolList), {
     x: MARGIN + 80, y: y - 46, size: 10, font, color: CREDO_GRAY,
   });
 
@@ -236,7 +243,7 @@ async function renderCover(
     }
     const school = opts.schoolsById[schoolId];
     if (sortedSchoolIds.length > 1 && school) {
-      page.drawText(`${school.code}  ${school.name}`, {
+      page.drawText(toPdfText(`${school.code}  ${school.name}`), {
         x: MARGIN, y, size: 10, font: fontBold, color: CREDO_PRIMARY,
       });
       y -= 14;
@@ -245,7 +252,7 @@ async function renderCover(
     const sortedAccountKeys = Object.keys(accounts).sort();
     for (const acc of sortedAccountKeys) {
       const { name, soll, haben } = accounts[acc];
-      page.drawText(`${acc}  ${truncateString(name, 30)}`, {
+      page.drawText(toPdfText(`${acc}  ${truncateString(name, 30)}`), {
         x: MARGIN + 8, y, size: 9, font: fontMono, color: BLACK,
       });
       page.drawText(`Soll: ${formatAmountDe(soll)} EUR`, {
@@ -268,7 +275,7 @@ async function renderCover(
     thickness: 0.5,
   });
   page.drawText(
-    `Erstellt ${formatDateTimeDe(opts.generatedAt)} von ${opts.generatedByName}`,
+    toPdfText(`Erstellt ${formatDateTimeDe(opts.generatedAt)} von ${opts.generatedByName}`),
     { x: MARGIN, y: footerY, size: 8, font, color: CREDO_GRAY },
   );
   page.drawText(`Bundle-SHA-256: ${bundleSha}`, {
@@ -325,10 +332,10 @@ async function renderSeparatorPage(
   let leftY = y;
   const visibleFields = args.line.fields.filter(f => f.includeOnSeparator);
   for (const f of visibleFields) {
-    page.drawText(`${f.dmsKey}:`, {
+    page.drawText(toPdfText(`${f.dmsKey}:`), {
       x: leftX, y: leftY, size: 10, font: fontBold, color: CREDO_PRIMARY,
     });
-    page.drawText(f.value || '—', {
+    page.drawText(toPdfText(f.value || '—'), {
       x: leftX + labelW, y: leftY, size: 10, font: fontMono, color: BLACK,
       maxWidth: qrX - leftX - labelW - 10,
     });
@@ -347,13 +354,13 @@ async function renderSeparatorPage(
     ? `${args.receipt.originalName}  (Beleg ${args.fileIndex} von ${args.totalFiles})`
     : '— keine Belegdatei —';
   page.drawText('Datei:', { x: leftX, y: fy, size: 10, font: fontBold, color: CREDO_PRIMARY });
-  page.drawText(fileLabel, { x: leftX + labelW, y: fy, size: 10, font, color: BLACK });
+  page.drawText(toPdfText(fileLabel), { x: leftX + labelW, y: fy, size: 10, font, color: BLACK });
   fy -= 16;
 
   if (args.receipt) {
     page.drawText('Hochgeladen:', { x: leftX, y: fy, size: 10, font: fontBold, color: CREDO_PRIMARY });
     page.drawText(
-      `${formatDateTimeDe(args.receipt.uploadedAt)} · ${args.receipt.uploadedByName}`,
+      toPdfText(`${formatDateTimeDe(args.receipt.uploadedAt)} · ${args.receipt.uploadedByName}`),
       { x: leftX + labelW, y: fy, size: 10, font, color: BLACK },
     );
     fy -= 16;
@@ -365,7 +372,7 @@ async function renderSeparatorPage(
 
   // Footer
   page.drawText(
-    `Mandant ${args.booking.school.code}  ·  Beleg-Nr. ${args.booking.bookingDate.getFullYear()}-${String(args.booking.receiptNumber).padStart(5, '0')}`,
+    toPdfText(`Mandant ${args.booking.school.code}  ·  Beleg-Nr. ${args.booking.bookingDate.getFullYear()}-${String(args.booking.receiptNumber).padStart(5, '0')}`),
     { x: MARGIN, y: MARGIN, size: 8, font, color: CREDO_GRAY },
   );
 }
@@ -391,25 +398,33 @@ async function embedReceipt(pdfDoc: PDFDocument, receipt: ExportReceipt): Promis
   }
 
   if (receipt.mimeType === 'application/pdf') {
-    let src: PDFDocument;
+    let copied: PDFPage[];
     try {
       // Kein ignoreEncryption — verschlüsselte PDFs landen im catch und
       // werden als Fehlerseite eingebettet statt unbrauchbar gemerged.
-      src = await PDFDocument.load(buf);
-    } catch (err) {
-      drawErrorPage(pdfDoc, `PDF nicht lesbar (ggf. verschlüsselt): ${receipt.originalName}`);
+      // Auch das Seitenlesen gehoert hinein: eine beschaedigte Datei, die mit
+      // "%PDF" beginnt, laesst sich laden, wirft aber erst hier — und brach
+      // sonst den ganzen Export des Zeitraums ab.
+      const src = await PDFDocument.load(buf);
+      copied = await pdfDoc.copyPages(src, src.getPageIndices());
+    } catch {
+      drawErrorPage(pdfDoc, `PDF nicht lesbar (beschädigt oder verschlüsselt): ${receipt.originalName}`);
       return;
     }
-    const indices = src.getPageIndices();
-    const copied = await pdfDoc.copyPages(src, indices);
     for (const p of copied) pdfDoc.addPage(p);
     return;
   }
 
   if (receipt.mimeType === 'image/jpeg' || receipt.mimeType === 'image/png') {
-    const img = receipt.mimeType === 'image/jpeg'
-      ? await pdfDoc.embedJpg(buf)
-      : await pdfDoc.embedPng(buf);
+    let img: PDFImage;
+    try {
+      img = receipt.mimeType === 'image/jpeg'
+        ? await pdfDoc.embedJpg(buf)
+        : await pdfDoc.embedPng(buf);
+    } catch {
+      drawErrorPage(pdfDoc, `Bild nicht lesbar (beschädigt): ${receipt.originalName}`);
+      return;
+    }
     const page = pdfDoc.addPage([A4_W, A4_H]);
     const maxW = A4_W - 2 * MARGIN;
     const maxH = A4_H - 2 * MARGIN;
@@ -433,7 +448,7 @@ function drawErrorPage(pdfDoc: PDFDocument, message: string): void {
   page.drawText('Beleg konnte nicht eingebettet werden', {
     x: MARGIN, y: A4_H - MARGIN - 40, size: 14,
   });
-  page.drawText(message, {
+  page.drawText(toPdfText(message), {
     x: MARGIN, y: A4_H - MARGIN - 70, size: 10,
   });
 }

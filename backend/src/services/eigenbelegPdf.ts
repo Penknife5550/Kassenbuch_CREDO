@@ -1,8 +1,8 @@
 import PDFDocument from 'pdfkit';
-import * as iconv from 'iconv-lite';
 import { drawCredoLogo } from './credoLogo';
 import { CREDO_PRIMARY, CREDO_RED, drawCredoFooter, formatDateDE } from './pdfService';
 import { EigenbelegPosition, betragInWorten, formatCents } from './eigenbelegService';
+import { toPdfText } from './pdfText';
 
 export interface EigenbelegPdfData {
   issuer: { name: string; address: string };
@@ -58,26 +58,6 @@ const TIMESTAMP_FORMAT = new Intl.DateTimeFormat('de-DE', {
   minute: '2-digit',
   hour12: false,
 });
-
-/**
- * Bringt Eingaben auf den Zeichensatz der PDF-Standardschriften (WinAnsi).
- * Alles ausserhalb davon — Emoji, kyrillische Zeichen — druckt pdfkit als
- * Zeichensalat; hier wird es zu "?". Zeilenumbrueche werden zu Leerzeichen.
- *
- * Vorher wird geglaettet, was beim Kopieren aus Word oder PDF-Listen mitkommt
- * und sonst als "?" im Beleg stuende: zerlegte Umlaute (u + Trema), unsichtbare
- * Zeichen, Sonder-Leerzeichen und Bindestrich-Varianten.
- */
-export function toPdfText(text: string): string {
-  const singleLine = text
-    .normalize('NFC')
-    .replace(/[​-‏⁠﻿]/g, '')
-    .replace(/[ -   　]/g, ' ')
-    .replace(/[‐-‒−]/g, '-')
-    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
-    .trim();
-  return iconv.decode(iconv.encode(singleLine, 'win1252'), 'win1252');
-}
 
 /**
  * Erzeugt den Eigenbeleg als PDF im Speicher. Der Aufrufer legt den Buffer ab
@@ -282,13 +262,16 @@ function drawPositions(doc: Doc, data: EigenbelegPdfData, left: number, width: n
   };
 
   let y = drawHead(startY);
+  const sumH = 24;
 
   data.positions.forEach((position, index) => {
     const text = toPdfText(position.label);
     doc.font('Helvetica').fontSize(9.5);
     const rowH = Math.max(16, doc.heightOfString(text, { width: labelW }) + 7);
+    // Die letzte Position nimmt die Summe mit, beide stehen immer auf derselben Seite
+    const reserve = index === data.positions.length - 1 ? sumH : 0;
 
-    if (y + rowH > contentBottom(doc)) {
+    if (y + rowH + reserve > contentBottom(doc)) {
       y = drawHead(continueOnNewPage(doc, data, left, width));
     }
 
@@ -303,10 +286,7 @@ function drawPositions(doc: Doc, data: EigenbelegPdfData, left: number, width: n
     doc.moveTo(left, y).lineTo(right, y).lineWidth(0.5).strokeColor(ROW_RULE).stroke();
   });
 
-  // Summe — gehoert zur letzten Position, deshalb nie allein auf eine neue Seite
-  if (y + 24 > contentBottom(doc)) {
-    y = continueOnNewPage(doc, data, left, width);
-  }
+  // Summe — der Platz dafuer ist mit der letzten Position reserviert
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.2).strokeColor(CREDO_PRIMARY).stroke();
   doc.font('Helvetica-Bold').fontSize(11).fillColor(INK);
   doc.text('Summe', labelX, y + 7, { lineBreak: false });

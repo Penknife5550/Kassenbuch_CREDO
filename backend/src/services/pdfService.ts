@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
+import { toPdfText } from './pdfText';
 
 interface PdfBooking {
   receiptNumber: number;
@@ -58,7 +59,9 @@ const COL_WIDTHS = [38, 48, 140, 52, 52, 28, 66, 66, 66];
 const HEADERS = ['Beleg', 'Datum', 'Buchungstext', 'Konto', 'Gegen', 'KSt', 'Einnahme', 'Ausgabe', 'Saldo'];
 
 export function generateKassenbuchPdf(options: PdfOptions) {
-  const { bookings, schoolName, schoolCode, dateFrom, dateTo, openingBalance } = options;
+  const { bookings, dateFrom, dateTo, openingBalance } = options;
+  const schoolName = toPdfText(options.schoolName);
+  const schoolCode = toPdfText(options.schoolCode);
 
   const logoPath = path.join(__dirname, '../../assets/credo_logo.png');
   const hasLogo = fs.existsSync(logoPath);
@@ -163,12 +166,12 @@ export function generateKassenbuchPdf(options: PdfOptions) {
     doc.text(String(b.receiptNumber), COL_X[0], y + 1, { width: COL_WIDTHS[0] });
     doc.text(formatDateDE(new Date(b.bookingDate)), COL_X[1], y + 1, { width: COL_WIDTHS[1] });
 
-    const desc = b.isStorno ? `[S] ${b.description}` : b.description;
+    const desc = toPdfText(b.isStorno ? `[S] ${b.description}` : b.description);
     doc.text(desc, COL_X[2], y + 1, { width: COL_WIDTHS[2], ellipsis: true, height: 10 });
 
     doc.text(b.account.accountNumber, COL_X[3], y + 1, { width: COL_WIDTHS[3] });
     doc.text(b.counterAccount.accountNumber, COL_X[4], y + 1, { width: COL_WIDTHS[4] });
-    doc.text(b.costCenter?.code || '', COL_X[5], y + 1, { width: COL_WIDTHS[5] });
+    doc.text(toPdfText(b.costCenter?.code || ''), COL_X[5], y + 1, { width: COL_WIDTHS[5] });
 
     // Einnahme / Ausgabe
     if (b.debitCredit === 'S') {
@@ -265,10 +268,14 @@ export interface KassensturzOptions {
 
 export function generateKassensturzPdf(options: KassensturzOptions) {
   const {
-    schoolName, schoolCode, closingDate, expectedBalance,
-    actualBalance, difference, comment, denominationCounts,
-    correctionBooking, closedByName,
+    closingDate, expectedBalance, actualBalance, difference, denominationCounts, correctionBooking,
   } = options;
+  // Freitext aus Maske und Stammdaten. Tabulatoren aus Excel, zerlegte Umlaute
+  // und Buchstaben ausserhalb des Zeichensatzes druckte pdfkit als Zeichensalat.
+  const schoolName = toPdfText(options.schoolName);
+  const schoolCode = toPdfText(options.schoolCode);
+  const closedByName = toPdfText(options.closedByName);
+  const comment = options.comment ? toPdfText(options.comment) : undefined;
 
   const logoPath = path.join(__dirname, '../../assets/credo_logo.png');
   const hasLogo = fs.existsSync(logoPath);
@@ -407,8 +414,8 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
     y += 16;
 
     const debitCreditLabel = correctionBooking.debitCredit === 'S' ? 'Einnahme (S)' : 'Ausgabe (H)';
-    const accountText = `${correctionBooking.account.accountNumber} ${correctionBooking.account.name}`;
-    const counterText = `${correctionBooking.counterAccount.accountNumber} ${correctionBooking.counterAccount.name}`;
+    const accountText = toPdfText(`${correctionBooking.account.accountNumber} ${correctionBooking.account.name}`);
+    const counterText = toPdfText(`${correctionBooking.counterAccount.accountNumber} ${correctionBooking.counterAccount.name}`);
     doc.font('Helvetica').fontSize(8).fillColor(CREDO_PRIMARY);
     doc.text(String(correctionBooking.receiptNumber), marginLeft + 4, y + 2, { width: 50 });
     doc.text(debitCreditLabel, marginLeft + 60, y + 2, { width: 60 });
@@ -424,7 +431,7 @@ export function generateKassensturzPdf(options: KassensturzOptions) {
     ) + 9;
 
     doc.font('Helvetica').fontSize(7).fillColor(CREDO_GRAY);
-    doc.text(`Buchungstext: ${correctionBooking.description}`, marginLeft + 4, y, { width: contentWidth });
+    doc.text(`Buchungstext: ${toPdfText(correctionBooking.description)}`, marginLeft + 4, y, { width: contentWidth });
     y += 20;
   }
 

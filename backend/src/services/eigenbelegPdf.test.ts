@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 
-import { renderEigenbelegPdf, toPdfText, type EigenbelegPdfData } from './eigenbelegPdf';
+import { renderEigenbelegPdf, type EigenbelegPdfData } from './eigenbelegPdf';
 import { EIGENBELEG_LIMITS, buildPositions } from './eigenbelegService';
+import { hasPrintableText, toPdfText } from './pdfText';
 
 function positions(count: number) {
   const built = buildPositions(
@@ -110,13 +111,37 @@ describe('eigenbelegPdf.renderEigenbelegPdf', () => {
   });
 });
 
-describe('eigenbelegPdf.toPdfText', () => {
+describe('pdfText.toPdfText', () => {
   it('laesst Umlaute, ß, Euro und typografische Zeichen stehen', () => {
     expect(toPdfText('Schülerausweis für 5,00 € – „groß“')).toBe('Schülerausweis für 5,00 € – „groß“');
   });
 
-  it('ersetzt, was die PDF-Schrift nicht kennt', () => {
+  it('ersetzt, was die PDF-Schrift nicht kennt und sich nicht umschreiben laesst', () => {
     expect(toPdfText('Жетон')).toBe('?????');
+    expect(toPdfText('Stift \uFFFD')).toBe('Stift ?');
+  });
+
+  // Der Name des Erstellers ersetzt die Unterschrift. Vorher stand dort "Ay?e Y?lmaz".
+  it('nimmt Buchstaben ausserhalb des Zeichensatzes nur den Akzent ab', () => {
+    expect(toPdfText('Ayşe Yılmaz')).toBe('Ayse Yilmaz');
+    expect(toPdfText('Paweł Wiśniewski')).toBe('Pawel Wisniewski');
+    expect(toPdfText('Antonín Dvořák')).toBe('Antonín Dvorák');
+  });
+
+  it('entfernt weiche Trennstriche und loest Ligaturen auf', () => {
+    expect(toPdfText('Schul\u00ADausflug')).toBe('Schulausflug');
+    expect(toPdfText('\uFB01lzstifte')).toBe('filzstifte');
+  });
+
+  it('macht aus Zeilen- und Absatztrennern Leerzeichen', () => {
+    expect(toPdfText('Kasse\tgezählt')).toBe('Kasse gezählt');
+    expect(toPdfText('Zeile 1\u2028Zeile 2')).toBe('Zeile 1 Zeile 2');
+  });
+
+  it('erkennt Felder, in denen nur Unsichtbares steht', () => {
+    expect(hasPrintableText('\u200B\u200B')).toBe(false);
+    expect(hasPrintableText(' Heft ')).toBe(true);
+    expect(hasPrintableText('ab', 3)).toBe(false);
   });
 
   it('macht aus Zeilenumbruechen Leerzeichen', () => {
@@ -131,7 +156,7 @@ describe('eigenbelegPdf.toPdfText', () => {
 
   it('glaettet Zeichen, die beim Kopieren aus Word mitkommen', () => {
     expect(toPdfText('Klasse 5‑a')).toBe('Klasse 5-a');
-    expect(toPdfText('Heft​﻿')).toBe('Heft');
+    expect(toPdfText('Heft\u200B\uFEFF')).toBe('Heft');
     expect(toPdfText('z. B. 3 Stück')).toBe('z. B. 3 Stück');
     expect(toPdfText('5 − 2')).toBe('5 - 2');
   });
